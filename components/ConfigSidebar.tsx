@@ -1,7 +1,7 @@
 import React from 'react';
 import { PluginSettings, Platform, JavaVersion } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Settings, Box, Database, Coffee, Tag } from 'lucide-react';
+import { Settings, Box, Database, Coffee, Tag, Key, Cpu } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -23,6 +23,34 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
       </div>
 
       <div className="p-4 space-y-6">
+        {/* AI Configuration - Crucial for GitHub Pages */}
+        <div className="space-y-3 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
+           <label className="text-xs font-semibold text-mc-gold uppercase tracking-wider flex items-center gap-1">
+            <Key className="w-3 h-3" /> API Configuration
+          </label>
+          <div>
+            <span className="text-xs text-gray-400 mb-1 block">OpenRouter API Key</span>
+            <input
+              type="password"
+              value={settings.apiKey}
+              onChange={(e) => handleChange('apiKey', e.target.value)}
+              placeholder="sk-or-..."
+              className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white placeholder-gray-600"
+            />
+            <p className="text-[10px] text-gray-500 mt-1">Required for public usage.</p>
+          </div>
+          <div>
+            <span className="text-xs text-gray-400 mb-1 block">AI Model</span>
+             <input
+              type="text"
+              value={settings.aiModel}
+              onChange={(e) => handleChange('aiModel', e.target.value)}
+              placeholder="google/gemini-2.0-flash-001"
+              className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white"
+            />
+          </div>
+        </div>
+
         {/* Identity */}
         <div className="space-y-3">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">

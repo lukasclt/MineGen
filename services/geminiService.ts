@@ -1,15 +1,20 @@
 import { PluginSettings, GeneratedProject } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
 
-const apiKey = process.env.API_KEY || ""; 
-const model = process.env.AI_MODEL || "google/gemini-2.0-flash-001"; // Default to a good, fast model on OpenRouter
-
 export const generatePluginCode = async (
   prompt: string, 
   settings: PluginSettings
 ): Promise<GeneratedProject> => {
+  // Safe environment variable access for browser environments
+  const envApiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : "";
+  const envModel = typeof process !== 'undefined' && process.env ? process.env.AI_MODEL : "";
+
+  // Prioritize settings (user input), then env, then empty
+  const apiKey = settings.apiKey || envApiKey || ""; 
+  const model = settings.aiModel || envModel || "google/gemini-2.0-flash-001";
+
   if (!apiKey) {
-    throw new Error("API Key is missing. Please check your environment variables.");
+    throw new Error("API Key is missing. Please enter your OpenRouter API Key in the settings sidebar.");
   }
 
   const technicalContext = `
@@ -64,6 +69,10 @@ export const generatePluginCode = async (
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      // Check for common 401/403 errors to give better feedback
+      if (response.status === 401) {
+          throw new Error("Invalid API Key. Please check the key in Settings.");
+      }
       throw new Error(`OpenRouter API Error: ${errorData.error?.message || response.statusText}`);
     }
 
