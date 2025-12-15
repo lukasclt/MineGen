@@ -1,0 +1,5 @@
+{
+  "name": "MineGen AI",
+  "description": "An AI-powered Minecraft plugin generator for Spigot, Paper, and Velocity. Chat with the AI to generate full Java project structures, configuration files, and logic instantly.",
+  "requestFramePermissions": []
+}
