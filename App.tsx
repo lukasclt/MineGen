@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
 import ConfigSidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
@@ -7,11 +7,52 @@ import { PluginSettings, GeneratedProject } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 
 const App: React.FC = () => {
+  // Initialize with default settings, will act as fallback
   const [settings, setSettings] = useState<PluginSettings>(DEFAULT_SETTINGS);
   const [currentProject, setCurrentProject] = useState<GeneratedProject | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  // Load state from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedSettings = localStorage.getItem('minegen_settings');
+      const savedProject = localStorage.getItem('minegen_current_project');
+
+      if (savedSettings) {
+        setSettings(JSON.parse(savedSettings));
+      }
+      if (savedProject) {
+        setCurrentProject(JSON.parse(savedProject));
+      }
+    } catch (e) {
+      console.error("Failed to load saved state", e);
+    } finally {
+      setIsLoaded(true);
+    }
+  }, []);
+
+  // Save state whenever it changes
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem('minegen_settings', JSON.stringify(settings));
+    }
+  }, [settings, isLoaded]);
+
+  useEffect(() => {
+    if (isLoaded) {
+      if (currentProject) {
+        localStorage.setItem('minegen_current_project', JSON.stringify(currentProject));
+      } else {
+        localStorage.removeItem('minegen_current_project');
+      }
+    }
+  }, [currentProject, isLoaded]);
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
+
+  // Prevent flash of default content
+  if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
 
   return (
     <div className="flex h-screen w-full bg-mc-dark text-white overflow-hidden font-sans">

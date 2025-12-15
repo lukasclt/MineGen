@@ -37,11 +37,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           setSelectedFile(fileExists);
       }
       
-      if (!isBuilding && retryCount === 0) {
-         setBuildStatus('idle');
-         setBuildLogs("");
-         setShowConsole(false);
-      }
+      // We do NOT reset build status here on simple re-renders, only if project object reference changes significantly
+      // or we want to allow persistent state. For now, let's keep status unless it's a completely new project.
     } else {
         setSelectedFile(null);
     }
@@ -65,17 +62,31 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     if (!project) return;
     
     const zip = new JSZip();
+
+    // Try to find the correct main class from plugin.yml to ensure Manifest is correct
+    let mainClass = `${settings.groupId}.${settings.artifactId}.Main`; // default fallback
+    const pluginYml = project.files.find(f => f.path.endsWith('plugin.yml'));
     
-    // 1. META-INF/MANIFEST.MF (Standard for Executable Jars)
+    if (pluginYml) {
+        // Simple regex to extract main: com.example.Main
+        const match = pluginYml.content.match(/^main:\s*(.+)$/m);
+        if (match && match[1]) {
+            mainClass = match[1].trim();
+        }
+    }
+    
+    // 1. META-INF/MANIFEST.MF
+    // We add specific entries to help the server potentially identify it, though it needs bytecode.
     zip.file("META-INF/MANIFEST.MF", 
       `Manifest-Version: 1.0\n` +
       `Created-By: 17.0.0 (MineGen AI Gradle Toolchain)\n` +
       `Implementation-Title: ${settings.name}\n` +
       `Implementation-Version: ${settings.version}\n` +
-      `Implementation-Vendor: ${settings.groupId}\n`
+      `Implementation-Vendor: ${settings.groupId}\n` +
+      `Main-Class: ${mainClass}\n` // Critical for "Cannot find main class" error
     );
 
-    // 2. Resources at Root (Standard Spigot/Velocity structure)
+    // 2. Resources at Root
     project.files.forEach(file => {
         if (file.path.includes("src/main/resources/")) {
             const fileName = file.path.split("src/main/resources/")[1];
@@ -83,18 +94,32 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         }
     });
 
-    // 3. Source/Classes
-    // In a browser environment, we bundle the source structure. 
-    // This allows the user to see the structure inside the JAR.
+    // 3. Source Files (Simulating structure)
+    // We put files in the folder structure matching packages so a human inspection looks correct.
     project.files.forEach(file => {
         if (file.path.includes("src/main/java/")) {
              const pathParts = file.path.split("src/main/java/");
              if (pathParts[1]) {
-                 // We place the files in the package structure
                  zip.file(pathParts[1], file.content);
              }
         }
     });
+
+    // 4. IMPORTANT NOTE FOR THE USER
+    zip.file("IMPORTANT_READ_ME.txt", 
+      "=== WHY YOU MIGHT SEE 'ClassNotFoundException' ===\n\n" +
+      "This JAR contains the *Source Code* and Resources.\n" +
+      "Browsers cannot generate compiled Java Bytecode (.class files).\n\n" +
+      "To run this on a server successfully:\n" +
+      "1. Extract this zip/jar.\n" +
+      "2. Run './gradlew build' in your terminal.\n" +
+      "3. Use the jar generated in 'build/libs/'.\n\n" +
+      "We have structured this file so you can view it, but a real JVM is required to compile."
+    );
+
+    // Add Gradle Wrapper scripts to the JAR so it can be treated as a source distribution too
+    zip.file("gradlew", `#!/bin/sh\n# Gradle Wrapper\nexec gradle "$@"\n`);
+    zip.file("gradlew.bat", `@echo off\ngradle %*\n`);
 
     const blob = await zip.generateAsync({type:"blob"});
     const url = URL.createObjectURL(blob);
@@ -135,7 +160,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     if (!project) return;
     
     setIsBuilding(true);
-    setBuildStatus('idle');
+    setBuildStatus('idle'); // Reset to idle to show progress
     setBuildLogs(`> Starting Gradle Daemon...\n> Gradle 8.5\n> Configuring project '${settings.name}'...\n> Task :compileJava\n`);
     setShowConsole(true);
     setRetryCount(0);
@@ -230,30 +255,28 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     <Download className="w-3 h-3" /> Source
                 </button>
 
-                {buildStatus !== 'success' && (
-                    <button 
-                      onClick={handleBuildAndAutoFix}
-                      disabled={isBuilding}
-                      className={`text-xs px-4 py-1.5 rounded flex items-center gap-2 transition-colors font-semibold border
-                        ${isBuilding 
-                          ? 'bg-purple-900/50 text-purple-200 border-purple-700 cursor-wait' 
-                          : buildStatus === 'error' 
-                            ? 'bg-red-900/30 text-red-200 border-red-800 hover:bg-red-900/50'
-                            : 'bg-mc-accent text-white border-blue-500 hover:bg-blue-600'}`}
-                    >
-                        {isBuilding ? (
-                          <>
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                            {retryCount > 0 ? `Fixing (${retryCount}/${MAX_RETRIES})...` : 'Building...'}
-                          </>
-                        ) : (
-                          <>
-                            {buildStatus === 'error' ? <Hammer className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
-                            {buildStatus === 'error' ? 'Retry Fix' : 'Build'}
-                          </>
-                        )}
-                    </button>
-                )}
+                 <button 
+                  onClick={handleBuildAndAutoFix}
+                  disabled={isBuilding}
+                  className={`text-xs px-4 py-1.5 rounded flex items-center gap-2 transition-colors font-semibold border
+                    ${isBuilding 
+                      ? 'bg-purple-900/50 text-purple-200 border-purple-700 cursor-wait' 
+                      : buildStatus === 'error' 
+                        ? 'bg-red-900/30 text-red-200 border-red-800 hover:bg-red-900/50'
+                        : 'bg-mc-accent text-white border-blue-500 hover:bg-blue-600'}`}
+                >
+                    {isBuilding ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        {retryCount > 0 ? `Fixing (${retryCount}/${MAX_RETRIES})...` : 'Building...'}
+                      </>
+                    ) : (
+                      <>
+                        {buildStatus === 'error' ? <Hammer className="w-3 h-3" /> : (buildStatus === 'success' ? <RefreshCw className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />)}
+                        {buildStatus === 'error' ? 'Retry Fix' : (buildStatus === 'success' ? 'Rebuild' : 'Build')}
+                      </>
+                    )}
+                </button>
             </div>
         </div>
 

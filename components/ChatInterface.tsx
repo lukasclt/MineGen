@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings } from '../types';
-import { Send, Bot, User, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Send, Bot, User, Loader2, Sparkles, AlertCircle, Trash2 } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 
 interface ChatInterfaceProps {
@@ -9,15 +9,48 @@ interface ChatInterfaceProps {
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenerated }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-        role: 'model',
-        text: `Hello! I'm MineGen AI. I can generate a ${settings.platform} plugin for Minecraft ${settings.mcVersion} (${settings.javaVersion}). describe what you want your plugin to do!`
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  // Load chat history
+  useEffect(() => {
+    const savedChat = localStorage.getItem('minegen_chat_history');
+    if (savedChat) {
+      try {
+        setMessages(JSON.parse(savedChat));
+      } catch (e) {
+        console.error("Failed to parse chat history");
+        setDefaultMessage();
+      }
+    } else {
+      setDefaultMessage();
+    }
+    setIsLoaded(true);
+  }, []);
+
+  // Save chat history
+  useEffect(() => {
+    if (isLoaded) {
+      localStorage.setItem('minegen_chat_history', JSON.stringify(messages));
+    }
+  }, [messages, isLoaded]);
+
+  const setDefaultMessage = () => {
+    setMessages([{
+        role: 'model',
+        text: `Hello! I'm MineGen AI. I can generate a ${settings.platform} plugin for Minecraft ${settings.mcVersion} (${settings.javaVersion}). Describe what you want your plugin to do!`
+    }]);
+  };
+
+  const clearChat = () => {
+    if (window.confirm("Clear chat history?")) {
+      setDefaultMessage();
+      localStorage.removeItem('minegen_chat_history');
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -25,7 +58,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading]);
+  }, [messages, isLoading, isLoaded]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,10 +92,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
     }
   };
 
+  if (!isLoaded) return null;
+
   return (
     <div className="flex flex-col h-full bg-mc-dark relative">
+       {/* Chat Header with Clear Button */}
+       <div className="absolute top-2 right-4 z-10">
+        <button 
+          onClick={clearChat}
+          className="text-gray-600 hover:text-red-400 p-2 rounded-full transition-colors"
+          title="Clear History"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24 custom-scrollbar">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'model' && (
