@@ -19,17 +19,17 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
     <div className={`fixed inset-y-0 left-0 z-30 w-72 bg-mc-panel border-r border-gray-700 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 overflow-y-auto`}>
       <div className="p-4 border-b border-gray-700 flex items-center gap-2">
         <Settings className="w-5 h-5 text-mc-accent" />
-        <h2 className="font-bold text-lg text-white">Project Settings</h2>
+        <h2 className="font-bold text-lg text-white">Configurações</h2>
       </div>
 
       <div className="p-4 space-y-6">
         {/* AI Configuration */}
         <div className="space-y-3 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
            <label className="text-xs font-semibold text-mc-gold uppercase tracking-wider flex items-center gap-1">
-            <Cpu className="w-3 h-3" /> AI Configuration
+            <Cpu className="w-3 h-3" /> Configuração da IA
           </label>
           <div>
-            <span className="text-xs text-gray-400 mb-1 block">AI Model</span>
+            <span className="text-xs text-gray-400 mb-1 block">Modelo de IA</span>
              <input
               type="text"
               value={settings.aiModel}
@@ -43,10 +43,10 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
         {/* Identity */}
         <div className="space-y-3">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-            <Tag className="w-3 h-3" /> Identity
+            <Tag className="w-3 h-3" /> Identidade
           </label>
           <div>
-            <span className="text-xs text-gray-500 mb-1 block">Project Name</span>
+            <span className="text-xs text-gray-500 mb-1 block">Nome do Projeto</span>
             <input
               type="text"
               value={settings.name}
@@ -79,11 +79,11 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
         {/* Environment */}
         <div className="space-y-3">
           <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-            <Database className="w-3 h-3" /> Environment
+            <Database className="w-3 h-3" /> Ambiente
           </label>
           
           <div>
-            <span className="text-xs text-gray-500 mb-1 block">Platform</span>
+            <span className="text-xs text-gray-500 mb-1 block">Plataforma</span>
             <select
               value={settings.platform}
               onChange={(e) => handleChange('platform', e.target.value)}
@@ -96,7 +96,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
           </div>
 
           <div>
-            <span className="text-xs text-gray-500 mb-1 block">MC Version</span>
+            <span className="text-xs text-gray-500 mb-1 block">Versão do MC</span>
             <select
               value={settings.mcVersion}
               onChange={(e) => handleChange('mcVersion', e.target.value)}
@@ -109,7 +109,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
           </div>
 
           <div>
-            <span className="text-xs text-gray-500 mb-1 block">Java Version</span>
+            <span className="text-xs text-gray-500 mb-1 block">Versão do Java</span>
             <select
               value={settings.javaVersion}
               onChange={(e) => handleChange('javaVersion', e.target.value)}
@@ -125,10 +125,10 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
         {/* Metadata */}
         <div className="space-y-3">
            <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1">
-            <Coffee className="w-3 h-3" /> Metadata
+            <Coffee className="w-3 h-3" /> Metadados
           </label>
           <div>
-            <span className="text-xs text-gray-500 mb-1 block">Description</span>
+            <span className="text-xs text-gray-500 mb-1 block">Descrição</span>
             <textarea
               value={settings.description}
               onChange={(e) => handleChange('description', e.target.value)}

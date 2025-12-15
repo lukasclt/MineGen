@@ -43,12 +43,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
   const setDefaultMessage = () => {
     setMessages([{
         role: 'model',
-        text: `Hello! I'm MineGen AI. I can generate a ${settings.platform} plugin for Minecraft ${settings.mcVersion} (${settings.javaVersion}). Describe what you want your plugin to do!`
+        text: `Olá! Eu sou o MineGen AI. Posso gerar um plugin ${settings.platform} para Minecraft ${settings.mcVersion} (${settings.javaVersion}). Me diga o que você quer que o seu plugin faça!`
     }]);
   };
 
   const clearChat = () => {
-    if (window.confirm("Start a new project? This will clear the chat and the current code.")) {
+    if (window.confirm("Iniciar um novo projeto? Isso limpará o chat e o código atual.")) {
       setDefaultMessage();
       localStorage.removeItem('minegen_chat_history');
       onClearProject(); // Reset the project in App.tsx
@@ -88,7 +88,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
     } catch (error: any) {
       const errorMessage: ChatMessage = {
         role: 'model',
-        text: error.message || "An error occurred while generating the plugin.",
+        text: error.message || "Ocorreu um erro ao gerar o plugin.",
         isError: true
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -106,7 +106,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
         <button 
           onClick={clearChat}
           className="text-gray-600 hover:text-red-400 p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700"
-          title="New Project (Clear History)"
+          title="Novo Projeto (Limpar Histórico)"
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -134,7 +134,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
                 <div className="mt-3 pt-3 border-t border-gray-600/50">
                   <div className="flex items-center gap-2 text-xs text-mc-green font-medium">
                     <Sparkles className="w-3 h-3" />
-                    {currentProject ? 'Project Updated Successfully' : 'Project Generated Successfully'}
+                    {currentProject ? 'Projeto Atualizado com Sucesso' : 'Projeto Gerado com Sucesso'}
                   </div>
                 </div>
               )}
@@ -155,7 +155,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
             </div>
             <div className="bg-mc-panel border border-gray-700 rounded-2xl rounded-bl-none px-5 py-3 flex items-center gap-2">
                 <span className="text-sm text-gray-400">
-                  {currentProject ? 'Analyzing existing code and applying changes...' : 'Constructing new plugin architecture...'}
+                  {currentProject ? 'Analisando código existente e aplicando mudanças...' : 'Construindo arquitetura do novo plugin...'}
                 </span>
             </div>
           </div>
@@ -170,7 +170,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={currentProject ? "E.g., Add a config option for the message..." : "E.g., Create a plugin that gives diamonds on join..."}
+            placeholder={currentProject ? "Ex: Adicione uma opção de config para a mensagem..." : "Ex: Crie um plugin que dê diamantes ao entrar..."}
             className="w-full bg-[#2B2D31] text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-lg focus:outline-none focus:border-mc-accent focus:ring-1 focus:ring-mc-accent placeholder-gray-500 transition-all"
             disabled={isLoading}
           />
@@ -183,7 +183,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
           </button>
         </form>
         <p className="text-center text-[10px] text-gray-500 mt-2">
-          AI can make mistakes. Always review the generated code before deploying to a production server.
+          IA pode cometer erros. Sempre revise o código gerado antes de implantar em um servidor de produção.
         </p>
       </div>
     </div>
