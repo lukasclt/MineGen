@@ -12,7 +12,7 @@ export const generatePluginCode = async (
 
   // Prioritize settings (user input), then env, then empty
   const apiKey = settings.apiKey || envApiKey || ""; 
-  const model = settings.aiModel || envModel || "";
+  const model = settings.aiModel || envModel || "google/gemini-2.0-flash-001";
 
   if (!apiKey) {
     throw new Error("API Key is missing. Please enter your OpenRouter API Key in the settings sidebar.");
