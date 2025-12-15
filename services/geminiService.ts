@@ -5,9 +5,10 @@ export const generatePluginCode = async (
   prompt: string, 
   settings: PluginSettings
 ): Promise<GeneratedProject> => {
-  // Safe environment variable access for browser environments
-  const envApiKey = typeof process !== 'undefined' && process.env ? process.env.API_KEY : "";
-  const envModel = typeof process !== 'undefined' && process.env ? process.env.AI_MODEL : "";
+  // Access environment variables using Vite's import.meta.env
+  // On Vercel, ensure your Environment Variables are prefixed with VITE_ (e.g., VITE_API_KEY)
+  const envApiKey = import.meta.env.VITE_API_KEY || "";
+  const envModel = import.meta.env.VITE_AI_MODEL || "";
 
   // Prioritize settings (user input), then env, then empty
   const apiKey = settings.apiKey || envApiKey || ""; 
