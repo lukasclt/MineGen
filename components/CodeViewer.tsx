@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Play, Terminal, XCircle, CheckCircle2, Loader2, Sparkles, RefreshCw } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Play, Terminal, XCircle, CheckCircle2, Loader2, Sparkles, RefreshCw, Package } from 'lucide-react';
 import JSZip from 'jszip';
 import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
 
@@ -79,6 +79,43 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     const a = document.createElement("a");
     a.href = url;
     a.download = `${settings.name}-gradle.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadJar = async () => {
+    if (!project) return;
+    
+    const zip = new JSZip();
+    
+    // Basic Manifest
+    zip.file("META-INF/MANIFEST.MF", `Manifest-Version: 1.0\nCreated-By: MineGen AI\nImplementation-Title: ${settings.name}\nImplementation-Version: ${settings.version}\n`);
+
+    // Add Resources to root of JAR (standard structure)
+    project.files.forEach(file => {
+        if (file.path.includes("src/main/resources/")) {
+            const fileName = file.path.split("src/main/resources/")[1];
+            if (fileName) zip.file(fileName, file.content);
+        }
+    });
+
+    // Add Note
+    zip.file("README_SIMULATION.txt", 
+        "This is a simulated build artifact.\n" +
+        "Since MineGen AI runs in the browser, it cannot compile Java Bytecode (.class files).\n\n" +
+        "To compile the real plugin:\n" +
+        "1. Download the Project ZIP.\n" +
+        "2. Extract it.\n" +
+        "3. Run './gradlew build' in your terminal."
+    );
+
+    const blob = await zip.generateAsync({type:"blob"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${settings.name}-${settings.version}.jar`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -170,6 +207,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                 {settings.name} <span className="text-gray-500 text-xs">(Gradle)</span>
             </h3>
             <div className="flex items-center gap-2">
+                {!isBuilding && buildStatus === 'success' && (
+                  <button 
+                    onClick={handleDownloadJar}
+                    className="text-xs bg-green-900/30 hover:bg-green-900/50 text-green-400 border border-green-700 px-3 py-1.5 rounded flex items-center gap-2 transition-all"
+                    title="Download Compiled JAR (Simulation)"
+                  >
+                    <Package className="w-3 h-3" /> Download .jar
+                  </button>
+                )}
+                
                 <button 
                   onClick={handleDownload}
                   className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded flex items-center gap-2 transition-colors border border-gray-600"
