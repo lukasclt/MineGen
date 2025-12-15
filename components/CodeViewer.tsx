@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Play, Hammer, AlertTriangle, Terminal, XCircle, CheckCircle2, Wand2, Loader2 } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Play, Terminal, XCircle, CheckCircle2, Loader2, Sparkles, RefreshCw } from 'lucide-react';
 import JSZip from 'jszip';
 import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
 
@@ -9,6 +9,8 @@ interface CodeViewerProps {
   settings: PluginSettings;
   onProjectUpdate?: (newProject: GeneratedProject) => void;
 }
+
+const MAX_RETRIES = 5; // Limite de tentativas de correção automática
 
 const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpdate }) => {
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
@@ -19,20 +21,28 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [buildStatus, setBuildStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [buildLogs, setBuildLogs] = useState<string>("");
   const [showConsole, setShowConsole] = useState(false);
-  
-  // Fix State
-  const [isFixing, setIsFixing] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (project && project.files.length > 0) {
-      const mainFile = project.files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || project.files[0];
-      setSelectedFile(mainFile);
-      // Reset build status on new project generation
-      setBuildStatus('idle');
-      setBuildLogs("");
-      setShowConsole(false);
+      // Se o arquivo selecionado ainda existir no novo projeto, mantém. Senão, vai pro Main.
+      const currentPath = selectedFile?.path;
+      const fileExists = project.files.find(f => f.path === currentPath);
+      
+      if (!selectedFile || !fileExists) {
+          const mainFile = project.files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || project.files[0];
+          setSelectedFile(mainFile);
+      } else {
+          // Atualiza o conteúdo do arquivo selecionado
+          setSelectedFile(fileExists);
+      }
+
+      if (buildStatus === 'idle') {
+          // Reset logs only if not in the middle of a build process loop
+          // (Handled by handleBuild logic)
+      }
     } else {
         setSelectedFile(null);
     }
@@ -60,7 +70,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         zip.file(file.path, file.content);
     });
     
-    // Add dummy gradlew scripts for completeness (as text, since we can't ship binaries easily)
+    // Add dummy gradlew scripts
     zip.file("gradlew", "#!/bin/sh\n# Dummy gradlew for structure. Please run 'gradle wrapper' locally.");
     zip.file("gradlew.bat", "@rem Dummy gradlew for structure. Please run 'gradle wrapper' locally.");
 
@@ -75,53 +85,70 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     URL.revokeObjectURL(url);
   };
 
-  const handleBuild = async () => {
+  const handleBuildAndAutoFix = async () => {
     if (!project) return;
     
     setIsBuilding(true);
     setBuildStatus('idle');
-    setBuildLogs("> Initializing Gradle Daemon...\n> Configuring project...\n> Task :compileJava\n");
+    setBuildLogs("> Initializing Gradle Daemon...\n> Configuring project...\n");
     setShowConsole(true);
+    setRetryCount(0);
 
-    try {
-      // Simulate network delay for realism
-      await new Promise(r => setTimeout(r, 1500));
-      
-      const result = await simulateGradleBuild(project, settings);
-      
-      setBuildLogs(prev => prev + result.logs);
-      setBuildStatus(result.success ? 'success' : 'error');
+    let currentProjectState = project;
+    let attempt = 0;
+    let success = false;
 
-      if (result.success) {
-        setBuildLogs(prev => prev + "\n\nBUILD SUCCESSFUL in 3s");
-      } else {
-        setBuildLogs(prev => prev + "\n\nBUILD FAILED");
-      }
+    // Loop de tentativas (Compile -> Error -> Fix -> Compile...)
+    while (attempt < MAX_RETRIES && !success) {
+         setRetryCount(attempt + 1);
+         setBuildLogs(prev => prev + `\n> [Attempt ${attempt + 1}/${MAX_RETRIES}] Executing Gradle Build...`);
 
-    } catch (error) {
-      setBuildStatus('error');
-      setBuildLogs(prev => prev + "\nError connecting to build server simulation.");
-    } finally {
-      setIsBuilding(false);
+         // Pequeno delay para UX
+         await new Promise(r => setTimeout(r, 1000));
+
+         try {
+             // 1. Simula Build
+             const result = await simulateGradleBuild(currentProjectState, settings);
+
+             if (result.success) {
+                 success = true;
+                 setBuildLogs(prev => prev + result.logs + `\n\n> BUILD SUCCESSFUL!`);
+                 setBuildStatus('success');
+             } else {
+                 setBuildLogs(prev => prev + result.logs + `\n> Build Failed.`);
+
+                 // Se não for a última tentativa, tenta corrigir
+                 if (attempt < MAX_RETRIES - 1) {
+                     setBuildLogs(prev => prev + `\n> -----------------------------------\n> DETECTED ERRORS. INITIALIZING AUTO-FIX AGENT...\n> Analyzing code and logs...`);
+
+                     try {
+                         // 2. Tenta Corrigir
+                         const fixedProject = await fixPluginCode(currentProjectState, result.logs, settings);
+                         
+                         // Atualiza estado local e global
+                         currentProjectState = fixedProject;
+                         if (onProjectUpdate) onProjectUpdate(fixedProject);
+
+                         setBuildLogs(prev => prev + `\n> Fix applied successfully.\n> Reloading files and retrying build...\n> -----------------------------------\n`);
+                     } catch (fixError: any) {
+                         setBuildLogs(prev => prev + `\n> CRITICAL: Auto-Fix failed to generate a response: ${fixError.message}\n> Stopping process.`);
+                         break; // Sai do loop se a IA de fix falhar
+                     }
+                 } else {
+                     setBuildLogs(prev => prev + `\n\n> Max retries (${MAX_RETRIES}) reached. Auto-fix could not resolve all errors.`);
+                     setBuildStatus('error');
+                 }
+             }
+         } catch (err: any) {
+             setBuildStatus('error');
+             setBuildLogs(prev => prev + `\n> System Error: ${err.message}`);
+             break;
+         }
+
+         attempt++;
     }
-  };
 
-  const handleFix = async () => {
-    if (!project || !onProjectUpdate) return;
-    
-    setIsFixing(true);
-    setBuildLogs(prev => prev + "\n\n> Attempting Auto-Fix with AI...\n> Analyzing errors...");
-
-    try {
-      const fixedProject = await fixPluginCode(project, buildLogs, settings);
-      onProjectUpdate(fixedProject);
-      setBuildLogs(prev => prev + "\n> Fix applied! Reloading project files...\n> Ready to rebuild.");
-      setBuildStatus('idle'); // Reset to allow rebuilding
-    } catch (error: any) {
-      setBuildLogs(prev => prev + `\n> Auto-Fix Failed: ${error.message}`);
-    } finally {
-      setIsFixing(false);
-    }
+    setIsBuilding(false);
   };
 
   if (!project) {
@@ -151,15 +178,15 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     <Download className="w-3 h-3" /> Zip
                 </button>
                 <button 
-                  onClick={handleBuild}
-                  disabled={isBuilding || isFixing}
+                  onClick={handleBuildAndAutoFix}
+                  disabled={isBuilding}
                   className={`text-xs px-3 py-1.5 rounded flex items-center gap-2 transition-colors font-semibold border
                     ${isBuilding 
-                      ? 'bg-gray-700 text-gray-400 border-gray-600 cursor-wait' 
+                      ? 'bg-purple-900/50 text-purple-200 border-purple-700 cursor-wait' 
                       : 'bg-[#21262d] text-white border-gray-600 hover:bg-[#30363d] hover:border-gray-500'}`}
                 >
                     {isBuilding ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3 text-green-500" />}
-                    {isBuilding ? 'Running Gradle...' : 'Run Gradle Build'}
+                    {isBuilding ? `Auto-Fixing (${retryCount}/${MAX_RETRIES})...` : 'Build & Auto-Fix'}
                 </button>
             </div>
         </div>
@@ -221,27 +248,22 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
 
       {/* Build Console / Terminal */}
       {showConsole && (
-        <div className={`border-t border-gray-700 bg-black flex flex-col transition-all duration-300 ease-in-out ${buildStatus === 'error' ? 'h-64' : 'h-48'}`}>
+        <div className={`border-t border-gray-700 bg-black flex flex-col transition-all duration-300 ease-in-out ${buildStatus !== 'idle' ? 'h-72' : 'h-48'}`}>
           <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-gray-700 h-10 shrink-0">
             <div className="flex items-center gap-2 text-xs font-mono">
               <Terminal className="w-3 h-3 text-gray-400" />
               <span className="text-gray-300">Run: ./gradlew build</span>
-              {isBuilding && <span className="text-blue-400 ml-2 animate-pulse">Running...</span>}
+              {isBuilding && (
+                  <span className="text-purple-400 ml-2 flex items-center gap-2">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      Attempt {retryCount}/{MAX_RETRIES} (Auto-Fix Active)
+                  </span>
+              )}
               {!isBuilding && buildStatus === 'success' && <span className="text-green-500 ml-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Build Success</span>}
-              {!isBuilding && buildStatus === 'error' && <span className="text-red-500 ml-2 flex items-center gap-1"><XCircle className="w-3 h-3"/> Build Failed</span>}
+              {!isBuilding && buildStatus === 'error' && <span className="text-red-500 ml-2 flex items-center gap-1"><XCircle className="w-3 h-3"/> Build Failed (Max Retries)</span>}
             </div>
             
             <div className="flex items-center gap-2">
-               {!isBuilding && buildStatus === 'error' && onProjectUpdate && (
-                <button 
-                  onClick={handleFix}
-                  disabled={isFixing}
-                  className="bg-red-600/20 hover:bg-red-600/30 text-red-400 hover:text-red-300 border border-red-900/50 px-3 py-1 rounded text-xs flex items-center gap-2 transition-all animate-in fade-in"
-                >
-                  {isFixing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />}
-                  {isFixing ? 'Fixing...' : 'Try Auto-Fix'}
-                </button>
-              )}
               <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white">
                 <div className="w-4 h-1 bg-gray-500 rounded-full"></div>
               </button>
