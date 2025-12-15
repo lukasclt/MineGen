@@ -7,15 +7,14 @@ export const generatePluginCode = async (
 ): Promise<GeneratedProject> => {
   // Access environment variables using Vite's import.meta.env
   // On Vercel, ensure your Environment Variables are prefixed with VITE_ (e.g., VITE_API_KEY)
-  const envApiKey = import.meta.env.VITE_API_KEY || "";
+  const apiKey = import.meta.env.VITE_API_KEY || "";
   const envModel = import.meta.env.VITE_AI_MODEL || "";
 
-  // Prioritize settings (user input), then env, then empty
-  const apiKey = settings.apiKey || envApiKey || ""; 
+  // Prioritize settings (user input) for model, env for API Key
   const model = settings.aiModel || envModel || "google/gemini-2.0-flash-001";
 
   if (!apiKey) {
-    throw new Error("API Key is missing. Please enter your OpenRouter API Key in the settings sidebar.");
+    throw new Error("API Key is missing. Please ensure VITE_API_KEY is set in your environment variables.");
   }
 
   const technicalContext = `
@@ -72,7 +71,7 @@ export const generatePluginCode = async (
       const errorData = await response.json().catch(() => ({}));
       // Check for common 401/403 errors to give better feedback
       if (response.status === 401) {
-          throw new Error("Invalid API Key. Please check the key in Settings.");
+          throw new Error("Invalid API Key. Please check your environment configuration.");
       }
       throw new Error(`OpenRouter API Error: ${errorData.error?.message || response.statusText}`);
     }

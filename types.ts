@@ -23,7 +23,6 @@ export interface PluginSettings {
   javaVersion: JavaVersion;
   description: string;
   author: string;
-  apiKey?: string;
   aiModel?: string;
 }
 
