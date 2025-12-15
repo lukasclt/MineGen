@@ -52,7 +52,11 @@ const App: React.FC = () => {
 
         {/* Code View Area - 60% width on desktop */}
         <div className="hidden md:flex flex-1 md:w-[60%] h-full overflow-hidden">
-          <CodeViewer project={currentProject} settings={settings} />
+          <CodeViewer 
+            project={currentProject} 
+            settings={settings}
+            onProjectUpdate={(newProj) => setCurrentProject(newProj)}
+          />
         </div>
         
         {/* Mobile View Toggle */}
