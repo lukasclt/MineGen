@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatMessage, PluginSettings } from '../types';
+import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
 import { Send, Bot, User, Loader2, Sparkles, AlertCircle, Trash2 } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
+  currentProject: GeneratedProject | null;
   onProjectGenerated: (project: any) => void;
+  onClearProject: () => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenerated }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject, onProjectGenerated, onClearProject }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -46,9 +48,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
   };
 
   const clearChat = () => {
-    if (window.confirm("Clear chat history?")) {
+    if (window.confirm("Start a new project? This will clear the chat and the current code.")) {
       setDefaultMessage();
       localStorage.removeItem('minegen_chat_history');
+      onClearProject(); // Reset the project in App.tsx
     }
   };
 
@@ -70,7 +73,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
     setIsLoading(true);
 
     try {
-      const project = await generatePluginCode(userMessage.text, settings);
+      // Pass currentProject to enable iterative updates
+      // If currentProject is null (start or after clear), it generates from scratch.
+      const project = await generatePluginCode(userMessage.text, settings, currentProject);
       
       const aiMessage: ChatMessage = {
         role: 'model',
@@ -100,8 +105,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
        <div className="absolute top-2 right-4 z-10">
         <button 
           onClick={clearChat}
-          className="text-gray-600 hover:text-red-400 p-2 rounded-full transition-colors"
-          title="Clear History"
+          className="text-gray-600 hover:text-red-400 p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700"
+          title="New Project (Clear History)"
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -129,7 +134,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
                 <div className="mt-3 pt-3 border-t border-gray-600/50">
                   <div className="flex items-center gap-2 text-xs text-mc-green font-medium">
                     <Sparkles className="w-3 h-3" />
-                    Plugin Generated Successfully
+                    {currentProject ? 'Project Updated Successfully' : 'Project Generated Successfully'}
                   </div>
                 </div>
               )}
@@ -149,7 +154,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
                 <Loader2 className="w-5 h-5 text-mc-accent animate-spin" />
             </div>
             <div className="bg-mc-panel border border-gray-700 rounded-2xl rounded-bl-none px-5 py-3 flex items-center gap-2">
-                <span className="text-sm text-gray-400">Constructing plugin architecture...</span>
+                <span className="text-sm text-gray-400">
+                  {currentProject ? 'Analyzing existing code and applying changes...' : 'Constructing new plugin architecture...'}
+                </span>
             </div>
           </div>
         )}
@@ -163,7 +170,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, onProjectGenera
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="E.g., Create a plugin that gives players a diamond when they join..."
+            placeholder={currentProject ? "E.g., Add a config option for the message..." : "E.g., Create a plugin that gives diamonds on join..."}
             className="w-full bg-[#2B2D31] text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-lg focus:outline-none focus:border-mc-accent focus:ring-1 focus:ring-mc-accent placeholder-gray-500 transition-all"
             disabled={isLoading}
           />

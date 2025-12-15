@@ -49,21 +49,44 @@ async function callOpenRouter(messages: any[], model: string) {
 
 export const generatePluginCode = async (
   prompt: string, 
-  settings: PluginSettings
+  settings: PluginSettings,
+  previousProject?: GeneratedProject | null
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
 
-  const technicalContext = `
-    Project Settings:
-    - Name: ${settings.name}
-    - Platform: ${settings.platform}
-    - Minecraft Version: ${settings.mcVersion}
-    - Java Version: ${settings.javaVersion}
-    - Group ID: ${settings.groupId}
-    - Artifact ID: ${settings.artifactId}
-    
-    User Request: ${prompt}
-  `;
+  let userPromptContext = "";
+
+  if (previousProject && previousProject.files.length > 0) {
+    // EDIT MODE: Inject existing files
+    const fileContext = previousProject.files.map(f => `--- ${f.path} ---\n${f.content}`).join("\n\n");
+    userPromptContext = `
+      CONTEXT: The user wants to MODIFY an existing project.
+      
+      CURRENT PROJECT FILES:
+      ${fileContext}
+      
+      USER REQUEST FOR CHANGES:
+      ${prompt}
+      
+      INSTRUCTIONS:
+      1. Analyze the current files.
+      2. Apply the requested changes (add new files, modify existing logic, or update configs).
+      3. Return the COMPLETE project structure (including unchanged files, so the full project is returned).
+    `;
+  } else {
+    // NEW PROJECT MODE
+    userPromptContext = `
+      Project Settings:
+      - Name: ${settings.name}
+      - Platform: ${settings.platform}
+      - Minecraft Version: ${settings.mcVersion}
+      - Java Version: ${settings.javaVersion}
+      - Group ID: ${settings.groupId}
+      - Artifact ID: ${settings.artifactId}
+      
+      User Request: ${prompt}
+    `;
+  }
 
   const systemPrompt = `${SYSTEM_INSTRUCTION}
 
@@ -77,7 +100,7 @@ export const generatePluginCode = async (
   try {
     return await callOpenRouter([
       { role: "system", content: systemPrompt },
-      { role: "user", content: technicalContext }
+      { role: "user", content: userPromptContext }
     ], model);
   } catch (error: any) {
     console.error("Generate Error:", error);

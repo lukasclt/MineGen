@@ -87,7 +87,9 @@ const App: React.FC = () => {
         <div className="flex-1 md:w-[40%] md:flex-none border-r border-gray-800 h-full overflow-hidden">
           <ChatInterface 
             settings={settings} 
+            currentProject={currentProject}
             onProjectGenerated={(proj) => setCurrentProject(proj)} 
+            onClearProject={() => setCurrentProject(null)}
           />
         </div>
 
