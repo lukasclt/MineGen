@@ -55,7 +55,14 @@ const App: React.FC = () => {
   if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
 
   return (
-    <div className="flex h-screen w-full bg-mc-dark text-white overflow-hidden font-sans">
+    <div className="flex h-screen w-full bg-mc-dark text-white overflow-hidden font-sans relative">
+      
+      {/* Animated Background Layers */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <div className="absolute inset-0 bg-grid-animate opacity-30"></div>
+        <div className="absolute inset-0 bg-radial-gradient"></div>
+      </div>
+
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div 
@@ -73,7 +80,7 @@ const App: React.FC = () => {
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col md:flex-row h-full relative">
+      <div className="flex-1 flex flex-col md:flex-row h-full relative z-10">
         
         {/* Mobile Header */}
         <div className="md:hidden h-14 border-b border-gray-700 flex items-center px-4 bg-mc-panel z-10 flex-shrink-0">
@@ -84,7 +91,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Chat Area - 40% width on desktop */}
-        <div className="flex-1 md:w-[40%] md:flex-none border-r border-gray-800 h-full overflow-hidden">
+        <div className="flex-1 md:w-[40%] md:flex-none border-r border-gray-800 h-full overflow-hidden bg-mc-dark/50 backdrop-blur-sm">
           <ChatInterface 
             settings={settings} 
             currentProject={currentProject}
@@ -94,7 +101,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Code View Area - 60% width on desktop */}
-        <div className="hidden md:flex flex-1 md:w-[60%] h-full overflow-hidden">
+        <div className="hidden md:flex flex-1 md:w-[60%] h-full overflow-hidden shadow-2xl">
           <CodeViewer 
             project={currentProject} 
             settings={settings}

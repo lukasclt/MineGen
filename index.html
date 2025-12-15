@@ -43,6 +43,28 @@
       ::-webkit-scrollbar-thumb:hover {
         background: #6B7280; 
       }
+
+      /* Animated Background */
+      .bg-grid-animate {
+        background-size: 40px 40px;
+        background-image:
+          linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        animation: moveGrid 20s linear infinite;
+      }
+
+      @keyframes moveGrid {
+        0% {
+          background-position: 0 0;
+        }
+        100% {
+          background-position: 40px 40px;
+        }
+      }
+
+      .bg-radial-gradient {
+        background: radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.05) 0%, rgba(29, 30, 34, 0) 70%);
+      }
     </style>
   <script type="importmap">
 {
