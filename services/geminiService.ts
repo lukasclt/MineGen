@@ -1,11 +1,22 @@
-import { GoogleGenAI } from "@google/genai";
+
+import OpenAI from 'openai';
 import { PluginSettings, GeneratedProject } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
 
+// Configuration for OpenRouter
+const client = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.API_KEY,
+  dangerouslyAllowBrowser: true, // Needed for client-side usage
+  defaultHeaders: {
+    "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "https://minegen.ai",
+    "X-Title": "MineGen AI",
+  }
+});
+
 const getModel = (settings?: PluginSettings) => {
-  // Use settings model or default. Remove 'google/' prefix if present (common in other providers)
-  const model = settings?.aiModel || "gemini-2.0-flash";
-  return model.replace(/^google\//, "");
+  // Return the model string from settings, or default to a Gemini model on OpenRouter
+  return settings?.aiModel || "google/gemini-2.0-flash-001";
 };
 
 export const generatePluginCode = async (
@@ -14,7 +25,6 @@ export const generatePluginCode = async (
   previousProject?: GeneratedProject | null
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   let userPromptContext = "";
 
@@ -61,22 +71,22 @@ export const generatePluginCode = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const completion = await client.chat.completions.create({
       model: model,
-      contents: userPromptContext,
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: "application/json"
-      }
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPromptContext }
+      ],
+      response_format: { type: "json_object" }
     });
 
-    const text = response.text;
+    const text = completion.choices[0]?.message?.content;
     if (!text) throw new Error("Sem resposta da IA");
     
     return JSON.parse(text);
   } catch (error: any) {
     console.error("Generate Error:", error);
-    throw new Error(error.message || "Falha ao gerar o código do plugin.");
+    throw new Error(error.message || "Falha ao gerar o código do plugin via OpenRouter.");
   }
 };
 
@@ -90,7 +100,6 @@ export const simulateGradleBuild = async (
   settings: PluginSettings
 ): Promise<BuildResult> => {
   const model = getModel(settings);
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const fileContext = project.files.map(f => `--- ${f.path} ---\n${f.content}`).join("\n\n");
   
@@ -111,16 +120,16 @@ export const simulateGradleBuild = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const completion = await client.chat.completions.create({
       model: model,
-      contents: prompt + "\n\nCÓDIGO PARA VERIFICAR:\n" + fileContext,
-      config: {
-        systemInstruction: "Você é um Simulador de Compilador Java/Gradle. Output JSON.",
-        responseMimeType: "application/json"
-      }
+      messages: [
+        { role: "system", content: "Você é um Simulador de Compilador Java/Gradle. Output JSON." },
+        { role: "user", content: prompt + "\n\nCÓDIGO PARA VERIFICAR:\n" + fileContext }
+      ],
+      response_format: { type: "json_object" }
     });
     
-    const text = response.text;
+    const text = completion.choices[0]?.message?.content;
     if (!text) return { success: false, logs: "Erro: Resposta vazia da IA" };
 
     return JSON.parse(text) as BuildResult;
@@ -135,7 +144,6 @@ export const fixPluginCode = async (
   settings: PluginSettings
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const fileContext = project.files.map(f => `--- ${f.path} ---\n${f.content}`).join("\n\n");
 
@@ -150,16 +158,16 @@ export const fixPluginCode = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const completion = await client.chat.completions.create({
       model: model,
-      contents: "CÓDIGO ATUAL:\n" + fileContext + "\n\n" + prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION + "\nCorrija o código baseado nos logs de erro.",
-        responseMimeType: "application/json"
-      }
+      messages: [
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nCorrija o código baseado nos logs de erro." },
+        { role: "user", content: "CÓDIGO ATUAL:\n" + fileContext + "\n\n" + prompt }
+      ],
+      response_format: { type: "json_object" }
     });
 
-    const text = response.text;
+    const text = completion.choices[0]?.message?.content;
     if (!text) throw new Error("Sem resposta da IA");
 
     return JSON.parse(text);
