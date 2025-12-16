@@ -1,3 +1,4 @@
+
 export enum Platform {
   SPIGOT = 'Spigot',
   PAPER = 'Paper',
@@ -13,6 +14,13 @@ export enum JavaVersion {
   JAVA_21 = '21'
 }
 
+export interface GitHubSettings {
+  token: string;
+  username: string;
+  repoName: string;
+  isConnected: boolean;
+}
+
 export interface PluginSettings {
   name: string;
   groupId: string;
@@ -24,6 +32,7 @@ export interface PluginSettings {
   description: string;
   author: string;
   aiModel?: string;
+  github?: GitHubSettings;
 }
 
 export interface GeneratedFile {

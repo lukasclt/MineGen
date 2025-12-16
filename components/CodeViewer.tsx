@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github, UploadCloud, PlayCircle, Loader2, ArrowUpCircle } from 'lucide-react';
 import JSZip from 'jszip';
 import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
+import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact } from '../services/githubService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
 
 interface CodeViewerProps {
@@ -11,19 +13,19 @@ interface CodeViewerProps {
   onProjectUpdate?: (newProject: GeneratedProject) => void;
 }
 
-const MAX_RETRIES = 3;
-
 const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpdate }) => {
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
   const [copied, setCopied] = useState(false);
   
-  // Build Test State
-  const [isTesting, setIsTesting] = useState(false);
-  const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  // GitHub / Build State
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [buildStatus, setBuildStatus] = useState<'idle' | 'queued' | 'in_progress' | 'success' | 'failure'>('idle');
   const [buildLogs, setBuildLogs] = useState<string>("");
   const [showConsole, setShowConsole] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  const [buildProgress, setBuildProgress] = useState(0);
+  const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
+  
+  // Local Simulation State (fallback)
+  const [isSimulating, setIsSimulating] = useState(false);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
@@ -36,7 +38,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           const mainFile = project.files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || project.files[0];
           setSelectedFile(mainFile);
       } else {
-          // Verify if content changed (e.g. after auto-fix)
+          // Verify if content changed
           if (fileExists && fileExists.content !== selectedFile?.content) {
              setSelectedFile(fileExists);
           }
@@ -60,84 +62,113 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
   };
 
-  const handleAddCloudBuild = () => {
-    if (!project || !onProjectUpdate) return;
-
-    const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
+  // 1. Ensure Workflow file exists
+  const ensureWorkflowFile = () => {
+    if (!project || !onProjectUpdate) return false;
     const workflowPath = ".github/workflows/build.yml";
+    if (!project.files.some(f => f.path === workflowPath)) {
+        const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
+        const newFile: GeneratedFile = { path: workflowPath, content: workflowContent, language: 'yaml' };
+        const updatedProject = { ...project, files: [...project.files, newFile] };
+        onProjectUpdate(updatedProject);
+        return true; // Added
+    }
+    return false; // Existed
+  };
 
-    // Check if already exists
-    if (project.files.some(f => f.path === workflowPath)) {
-        alert("Configuração de Cloud Build já existe!");
+  // 2. Commit & Push
+  const handleCommitAndPush = async () => {
+    if (!settings.github?.isConnected || !project) {
+        alert("Por favor, conecte sua conta do GitHub na barra lateral primeiro.");
         return;
     }
-
-    const newFile: GeneratedFile = {
-        path: workflowPath,
-        content: workflowContent,
-        language: 'yaml'
-    };
-
-    const updatedProject = {
-        ...project,
-        files: [...project.files, newFile]
-    };
-
-    onProjectUpdate(updatedProject);
-    setSelectedFile(newFile);
     
-    // Simulate log
-    setBuildLogs(prev => prev + `\n> Configuração GitHub Actions adicionada em ${workflowPath}\n> Suba este projeto no GitHub para compilar o .jar gratuitamente.\n`);
+    // Ensure workflow exists before push
+    ensureWorkflowFile();
+
+    setIsCommitting(true);
+    setBuildLogs(prev => prev + `\n> Iniciando Commit e Push para ${settings.github!.repoName}...\n`);
     setShowConsole(true);
+
+    try {
+        await commitAndPushFiles(settings.github!, project.files, `Update plugin: ${new Date().toISOString()}`);
+        setBuildLogs(prev => prev + `> Arquivos enviados com sucesso!\n> O GitHub Actions deve iniciar em breve.\n`);
+        setBuildStatus('queued');
+        
+        // Start polling for build
+        pollBuildStatus();
+    } catch (e: any) {
+        setBuildLogs(prev => prev + `> ERRO ao enviar: ${e.message}\n`);
+    } finally {
+        setIsCommitting(false);
+    }
+  };
+
+  // 3. Poll GitHub Actions
+  const pollBuildStatus = async () => {
+      if (!settings.github) return;
+      
+      setBuildLogs(prev => prev + `> Aguardando início do Workflow (GitHub Actions)...\n`);
+      
+      let attempts = 0;
+      const maxAttempts = 30; // 30 * 2s = 60s timeout for start
+      const pollInterval = setInterval(async () => {
+          attempts++;
+          try {
+             const run = await getLatestWorkflowRun(settings.github!);
+             
+             if (run) {
+                 if (run.status === 'completed') {
+                     clearInterval(pollInterval);
+                     setBuildLogs(prev => prev + `> Workflow Finalizado: ${run.conclusion}\n`);
+                     
+                     if (run.conclusion === 'success') {
+                         setBuildStatus('success');
+                         setBuildLogs(prev => prev + `> Buscando artefato (JAR)...\n`);
+                         const url = await getBuildArtifact(settings.github!, run.id);
+                         if (url) {
+                            setArtifactUrl(url);
+                            setBuildLogs(prev => prev + `> JAR Disponível para Download!\n`);
+                         } else {
+                            setBuildLogs(prev => prev + `> Erro: Artefato não encontrado, mas build passou.\n`);
+                         }
+                     } else {
+                         setBuildStatus('failure');
+                     }
+                 } else {
+                     setBuildStatus('in_progress');
+                     if (attempts % 5 === 0) { // Log every ~10s
+                         setBuildLogs(prev => prev + `> Status atual: ${run.status}...\n`);
+                     }
+                 }
+             }
+          } catch (e) {
+              console.error(e);
+          }
+
+          if (attempts > 120) { // 4 minutes max polling
+              clearInterval(pollInterval);
+              setBuildLogs(prev => prev + `> Timeout aguardando build.\n`);
+          }
+      }, 2000);
+  };
+
+  // 4. Download Artifact
+  const handleDownloadArtifact = async () => {
+      if (!artifactUrl || !settings.github) return;
+      try {
+          await downloadArtifact(settings.github.token, artifactUrl, `${settings.name}-build.zip`);
+      } catch (e: any) {
+          alert("Erro ao baixar: " + e.message);
+      }
   };
 
   const handleDownloadSource = async () => {
     if (!project) return;
     const zip = new JSZip();
-    
-    // Full Gradle Project Structure
-    project.files.forEach(file => {
-        zip.file(file.path, file.content);
-    });
-    
-    // Add Gradle Wrapper Scripts
+    project.files.forEach(file => zip.file(file.path, file.content));
     zip.file("gradlew", `#!/bin/sh\n# Gradle Wrapper Script\nexec gradle "$@"\n`);
     zip.file("gradlew.bat", `@if "%DEBUG%" == "" @echo off\ngradle %*\n`);
-    
-    // Add README
-    zip.file("README.md", 
-`# ${settings.name}
-
-Gerado por MineGen AI.
-
-## Como Compilar (Build)
-
-### Opção 1: Cloud Grátis (Recomendado)
-Este projeto já está configurado com **GitHub Actions**.
-1. Crie um repositório no GitHub.
-2. Suba estes arquivos (Push).
-3. Vá na aba "Actions" no GitHub.
-4. O build iniciará automaticamente. Ao final, baixe o .jar em "Artifacts".
-
-### Opção 2: Localmente
-1. Certifique-se de ter o Java ${settings.javaVersion} instalado.
-2. Abra o terminal nesta pasta.
-3. Execute o comando de build:
-
-   **Windows:**
-   \`\`\`
-   gradlew.bat build
-   \`\`\`
-
-   **Linux/Mac:**
-   \`\`\`
-   chmod +x gradlew
-   ./gradlew build
-   \`\`\`
-
-4. O JAR do seu plugin estará em \`build/libs/\`.
-`);
-    
     const blob = await zip.generateAsync({type:"blob"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -147,107 +178,6 @@ Este projeto já está configurado com **GitHub Actions**.
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  };
-
-  const startProgressSimulation = () => {
-    setBuildProgress(0);
-    return setInterval(() => {
-      setBuildProgress(prev => {
-        if (prev >= 95) return 95; // Stall at 95%
-        // Random increment between 1 and 5
-        return prev + Math.floor(Math.random() * 5) + 1;
-      });
-    }, 400); // Update every 400ms
-  };
-
-  const handleTestBuild = async () => {
-    if (!project) return;
-    
-    setIsTesting(true);
-    setTestStatus('idle');
-    setBuildLogs(`> Inicializando Ambiente Virtual de Build...\n> Verificando estrutura do projeto '${settings.name}'...\n> Task :compileJava\n`);
-    
-    // Não abrir o console automaticamente (Background mode)
-    // setShowConsole(true); 
-    
-    setRetryCount(0);
-    setBuildProgress(0);
-
-    let currentProjectState = project;
-    let attempt = 0;
-    let success = false;
-    let progressInterval: ReturnType<typeof setInterval> | null = null;
-
-    while (attempt <= MAX_RETRIES && !success) {
-         setRetryCount(attempt);
-         
-         if (attempt > 0) {
-            setBuildLogs(prev => prev + `\n> Compilação FALHOU.\n> Aplicando Auto-Correção IA (Tentativa ${attempt}/${MAX_RETRIES})...\n`);
-         }
-         
-         // Small delay for UX
-         await new Promise(r => setTimeout(r, 800));
-
-         try {
-             // --- STEP 1: VERIFY/COMPILE ---
-             setBuildProgress(0); // Reset for this step
-             progressInterval = startProgressSimulation();
-             
-             const result = await simulateGradleBuild(currentProjectState, settings);
-             
-             if (progressInterval) clearInterval(progressInterval);
-             setBuildProgress(100); // Complete this step
-
-             if (result.success) {
-                 success = true;
-                 setBuildLogs(prev => prev + result.logs + `\n> Task :processResources\n> Task :classes\n> Task :jar\n> Task :assemble\n> Task :build\n\nBUILD SUCCESSFUL\nTodas as verificações passaram. Código fonte válido.`);
-                 setTestStatus('success');
-             } else {
-                 setBuildLogs(prev => prev + result.logs);
-
-                 // --- STEP 2: AUTO-FIX (If failed) ---
-                 if (attempt < MAX_RETRIES) {
-                     setBuildLogs(prev => prev + `\n> Analisando erros para correção automática...\n`);
-                     
-                     // Reset progress for fix phase
-                     setBuildProgress(0);
-                     progressInterval = startProgressSimulation();
-
-                     try {
-                         const fixedProject = await fixPluginCode(currentProjectState, result.logs, settings);
-                         
-                         if (progressInterval) clearInterval(progressInterval);
-                         setBuildProgress(100);
-
-                         currentProjectState = fixedProject;
-                         
-                         // Update the project in the main state so the user sees the changes immediately
-                         if (onProjectUpdate) onProjectUpdate(fixedProject);
-
-                         setBuildLogs(prev => prev + `> Patches aplicados. Recompilando...\n--------------------------------------------------\n`);
-                     } catch (fixError: any) {
-                         if (progressInterval) clearInterval(progressInterval);
-                         setBuildLogs(prev => prev + `\n> Erro Crítico na auto-correção: ${fixError.message}`);
-                         break;
-                     }
-                 } else {
-                     setBuildLogs(prev => prev + `\n\nBUILD FAILED\nLimite de tentativas de auto-correção atingido. Por favor, revise o código manualmente.`);
-                     setTestStatus('error');
-                     setShowConsole(true); // Abre o console automaticamente APENAS se falhar tudo
-                 }
-             }
-         } catch (err: any) {
-             if (progressInterval) clearInterval(progressInterval);
-             setTestStatus('error');
-             setBuildLogs(prev => prev + `\n> Erro no Sistema: ${err.message}`);
-             setShowConsole(true);
-             break;
-         }
-         attempt++;
-    }
-    
-    if (progressInterval) clearInterval(progressInterval);
-    setIsTesting(false);
   };
 
   if (!project) {
@@ -270,45 +200,50 @@ Este projeto já está configurado com **GitHub Actions**.
             </h3>
             
             <div className="flex items-center gap-2">
-                 {/* Build Controls */}
+                 
+                 {/* Main Controls */}
                  <div className="flex items-center bg-black/30 rounded-lg p-0.5 border border-gray-700 mr-2">
+                    
+                    {/* 1. Commit/Push Button */}
                     <button 
-                      onClick={handleAddCloudBuild}
-                      className="text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold text-gray-300 hover:bg-gray-700 hover:text-white"
-                      title="Adicionar Configuração de Build Cloud (GitHub Actions)"
+                      onClick={handleCommitAndPush}
+                      disabled={isCommitting || !settings.github?.isConnected}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 cursor-not-allowed text-gray-500' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
+                      title={!settings.github?.isConnected ? "Conecte o GitHub na barra lateral" : "Enviar alterações para o GitHub"}
                     >
-                        <Github className="w-3 h-3" />
-                        <span className="hidden xl:inline">Cloud Build</span>
+                        {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
+                        <span className="hidden xl:inline">Commit & Push</span>
                     </button>
 
                     <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
-
-                    <button 
-                      onClick={handleTestBuild}
-                      disabled={isTesting}
-                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold
-                        ${isTesting 
-                          ? 'bg-purple-500/20 text-purple-300' 
-                          : testStatus === 'error' 
-                            ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
-                            : testStatus === 'success'
-                              ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
-                              : 'hover:bg-gray-700 text-gray-300'}`}
-                      title="Executar verificação do compilador IA"
-                    >
-                        {isTesting ? (
-                          <>
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                            {retryCount > 0 ? `Corrigindo (${retryCount}) ${buildProgress}%` : `Compilando ${buildProgress}%`}
-                          </>
-                        ) : (
-                          <>
-                            {testStatus === 'error' ? <Bug className="w-3 h-3" /> : (testStatus === 'success' ? <CheckCircle2 className="w-3 h-3" /> : <Hammer className="w-3 h-3" />)}
-                            {testStatus === 'error' ? 'Falha' : (testStatus === 'success' ? 'Sucesso' : 'Build')}
-                          </>
-                        )}
-                    </button>
                     
+                    {/* 2. Build Status/Download Button */}
+                    {buildStatus === 'success' && artifactUrl ? (
+                         <button 
+                            onClick={handleDownloadArtifact}
+                            className="text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold bg-green-500/20 text-green-300 hover:bg-green-500/30 animate-pulse"
+                            title="Baixar JAR Compilado"
+                         >
+                            <Download className="w-3 h-3" />
+                            <span>Download JAR</span>
+                         </button>
+                    ) : (
+                         <button 
+                            onClick={() => { setShowConsole(true); if(buildStatus === 'idle') handleCommitAndPush(); }}
+                            disabled={!settings.github?.isConnected}
+                            className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold
+                                ${buildStatus === 'in_progress' || buildStatus === 'queued' ? 'text-yellow-400' : 
+                                  buildStatus === 'failure' ? 'text-red-400' : 'text-gray-300 hover:bg-gray-700'}`}
+                         >
+                            {buildStatus === 'in_progress' || buildStatus === 'queued' ? <RefreshCw className="w-3 h-3 animate-spin"/> : <PlayCircle className="w-3 h-3" />}
+                            <span className="hidden xl:inline">
+                                {buildStatus === 'idle' ? 'Build (Cloud)' : 
+                                 buildStatus === 'queued' ? 'Na Fila...' : 
+                                 buildStatus === 'in_progress' ? 'Compilando...' : 'Falha'}
+                            </span>
+                         </button>
+                    )}
+
                     <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
 
                     <button
@@ -322,10 +257,10 @@ Este projeto já está configurado com **GitHub Actions**.
 
                 <button 
                   onClick={handleDownloadSource}
-                  className="text-xs bg-mc-accent hover:bg-blue-600 text-white font-semibold px-4 py-1.5 rounded flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20"
-                  title="Baixar Código Fonte do Projeto (ZIP)"
+                  className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold px-3 py-1.5 rounded flex items-center gap-2 transition-colors"
+                  title="Baixar Código Fonte (ZIP)"
                 >
-                    <Download className="w-3 h-3" /> Baixar
+                    <Download className="w-3 h-3" /> <span className="hidden md:inline">Fonte</span>
                 </button>
             </div>
         </div>
@@ -363,11 +298,6 @@ Este projeto já está configurado com **GitHub Actions**.
                     <div className="h-9 flex items-center justify-between px-4 bg-[#1e1e1e]/50 border-b border-gray-800 shrink-0">
                         <span className="text-xs text-gray-400 font-mono">{selectedFile.path}</span>
                         <div className="flex items-center gap-3">
-                           {testStatus === 'success' && (
-                             <span className="text-[10px] text-green-500 flex items-center gap-1 bg-green-900/20 px-2 py-0.5 rounded border border-green-900/50">
-                                <CheckCircle2 className="w-3 h-3" /> Pronto
-                             </span>
-                          )}
                           <button 
                               onClick={handleCopy}
                               className="text-gray-400 hover:text-white transition-colors"
@@ -397,16 +327,11 @@ Este projeto já está configurado com **GitHub Actions**.
           <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
             <div className="flex items-center gap-2 text-xs font-mono">
               <Terminal className="w-3 h-3 text-gray-400" />
-              <span className="text-gray-300">Terminal: ./gradlew build</span>
-              {isTesting && (
-                  <span className="text-purple-400 ml-2 flex items-center gap-2">
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                      {retryCount > 0 ? `Corrigindo (${retryCount}/${MAX_RETRIES})` : 'Compilando'}
-                      <span className="text-white font-bold">{buildProgress}%</span>
-                  </span>
-              )}
-              {!isTesting && testStatus === 'success' && <span className="text-green-500 ml-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Build Sucesso</span>}
-              {!isTesting && testStatus === 'error' && <span className="text-red-500 ml-2 flex items-center gap-1"><XCircle className="w-3 h-3"/> Build Falhou</span>}
+              <span className="text-gray-300">Terminal: GitHub Actions Log</span>
+              
+              {buildStatus === 'in_progress' && <span className="text-yellow-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Compilando na Nuvem...</span>}
+              {buildStatus === 'success' && <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Sucesso</span>}
+              {buildStatus === 'failure' && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3"/> Falha</span>}
             </div>
             
             <div className="flex items-center gap-2">
@@ -416,10 +341,16 @@ Este projeto já está configurado com **GitHub Actions**.
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-3 font-mono text-xs text-gray-300 custom-scrollbar">
-            <pre className="whitespace-pre-wrap font-mono">
-              {buildLogs}
-            </pre>
-            <div ref={consoleEndRef} />
+            {!settings.github?.isConnected ? (
+                <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-2">
+                    <p>Você precisa conectar sua conta do GitHub para ver os logs de build.</p>
+                </div>
+            ) : (
+                <>
+                    <pre className="whitespace-pre-wrap font-mono">{buildLogs}</pre>
+                    <div ref={consoleEndRef} />
+                </>
+            )}
           </div>
         </div>
       )}
