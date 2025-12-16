@@ -1,28 +1,30 @@
 import React from 'react';
 import { PluginSettings, Platform, JavaVersion } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Settings, Box, Database, Coffee, Tag, Cpu } from 'lucide-react';
+import { Settings, Box, Database, Coffee, Tag, Cpu, Download } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
   setSettings: React.Dispatch<React.SetStateAction<PluginSettings>>;
   isOpen: boolean;
   toggleSidebar: () => void;
+  showInstallButton?: boolean;
+  onInstall?: () => void;
 }
 
-const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, isOpen, toggleSidebar }) => {
+const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, isOpen, toggleSidebar, showInstallButton, onInstall }) => {
   const handleChange = (field: keyof PluginSettings, value: string) => {
     setSettings(prev => ({ ...prev, [field]: value }));
   };
 
   return (
-    <div className={`fixed inset-y-0 left-0 z-30 w-72 bg-mc-panel border-r border-gray-700 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 overflow-y-auto`}>
-      <div className="p-4 border-b border-gray-700 flex items-center gap-2">
+    <div className={`fixed inset-y-0 left-0 z-30 w-72 bg-mc-panel border-r border-gray-700 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 overflow-y-auto flex flex-col`}>
+      <div className="p-4 border-b border-gray-700 flex items-center gap-2 flex-shrink-0">
         <Settings className="w-5 h-5 text-mc-accent" />
         <h2 className="font-bold text-lg text-white">Configurações</h2>
       </div>
 
-      <div className="p-4 space-y-6">
+      <div className="p-4 space-y-6 flex-1 overflow-y-auto">
         {/* AI Configuration */}
         <div className="space-y-3 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
            <label className="text-xs font-semibold text-mc-gold uppercase tracking-wider flex items-center gap-1">
@@ -139,7 +141,16 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
         </div>
       </div>
 
-      <div className="p-4 border-t border-gray-700">
+      {/* Footer Area */}
+      <div className="p-4 border-t border-gray-700 flex flex-col gap-3">
+        {showInstallButton && onInstall && (
+          <button 
+            onClick={onInstall}
+            className="w-full bg-mc-green/20 hover:bg-mc-green/30 text-mc-green border border-mc-green/50 rounded-lg py-2 px-3 text-sm font-semibold flex items-center justify-center gap-2 transition-all animate-pulse"
+          >
+            <Download className="w-4 h-4" /> Instalar App
+          </button>
+        )}
         <p className="text-xs text-gray-500 text-center">MineGen AI v1.0.0</p>
       </div>
     </div>

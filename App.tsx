@@ -12,6 +12,10 @@ const App: React.FC = () => {
   const [currentProject, setCurrentProject] = useState<GeneratedProject | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  
+  // PWA Install State
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
 
   // Load state from localStorage on mount
   useEffect(() => {
@@ -49,6 +53,41 @@ const App: React.FC = () => {
     }
   }, [currentProject, isLoaded]);
 
+  // Handle PWA Install Prompt
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      // Prevent the mini-infobar from appearing on mobile
+      e.preventDefault();
+      // Stash the event so it can be triggered later.
+      setDeferredPrompt(e);
+      // Update UI notify the user they can install the PWA
+      setShowInstallButton(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      // Show the install prompt
+      deferredPrompt.prompt();
+      // Wait for the user to respond to the prompt
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+        } else {
+          console.log('User dismissed the install prompt');
+        }
+        setDeferredPrompt(null);
+        setShowInstallButton(false);
+      });
+    }
+  };
+
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
   // Prevent flash of default content
@@ -77,6 +116,8 @@ const App: React.FC = () => {
         setSettings={setSettings} 
         isOpen={sidebarOpen}
         toggleSidebar={toggleSidebar}
+        showInstallButton={showInstallButton}
+        onInstall={handleInstallClick}
       />
 
       {/* Main Content */}
