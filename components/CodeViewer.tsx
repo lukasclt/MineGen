@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github } from 'lucide-react';
 import JSZip from 'jszip';
 import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
+import { GITHUB_ACTION_TEMPLATE } from '../constants';
 
 interface CodeViewerProps {
   project: GeneratedProject | null;
@@ -59,6 +60,37 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
   };
 
+  const handleAddCloudBuild = () => {
+    if (!project || !onProjectUpdate) return;
+
+    const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
+    const workflowPath = ".github/workflows/build.yml";
+
+    // Check if already exists
+    if (project.files.some(f => f.path === workflowPath)) {
+        alert("Configuração de Cloud Build já existe!");
+        return;
+    }
+
+    const newFile: GeneratedFile = {
+        path: workflowPath,
+        content: workflowContent,
+        language: 'yaml'
+    };
+
+    const updatedProject = {
+        ...project,
+        files: [...project.files, newFile]
+    };
+
+    onProjectUpdate(updatedProject);
+    setSelectedFile(newFile);
+    
+    // Simulate log
+    setBuildLogs(prev => prev + `\n> Configuração GitHub Actions adicionada em ${workflowPath}\n> Suba este projeto no GitHub para compilar o .jar gratuitamente.\n`);
+    setShowConsole(true);
+  };
+
   const handleDownloadSource = async () => {
     if (!project) return;
     const zip = new JSZip();
@@ -79,6 +111,15 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
 Gerado por MineGen AI.
 
 ## Como Compilar (Build)
+
+### Opção 1: Cloud Grátis (Recomendado)
+Este projeto já está configurado com **GitHub Actions**.
+1. Crie um repositório no GitHub.
+2. Suba estes arquivos (Push).
+3. Vá na aba "Actions" no GitHub.
+4. O build iniciará automaticamente. Ao final, baixe o .jar em "Artifacts".
+
+### Opção 2: Localmente
 1. Certifique-se de ter o Java ${settings.javaVersion} instalado.
 2. Abra o terminal nesta pasta.
 3. Execute o comando de build:
@@ -135,7 +176,7 @@ Gerado por MineGen AI.
     let currentProjectState = project;
     let attempt = 0;
     let success = false;
-    let progressInterval: NodeJS.Timeout | null = null;
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
 
     while (attempt <= MAX_RETRIES && !success) {
          setRetryCount(attempt);
@@ -232,6 +273,17 @@ Gerado por MineGen AI.
                  {/* Build Controls */}
                  <div className="flex items-center bg-black/30 rounded-lg p-0.5 border border-gray-700 mr-2">
                     <button 
+                      onClick={handleAddCloudBuild}
+                      className="text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold text-gray-300 hover:bg-gray-700 hover:text-white"
+                      title="Adicionar Configuração de Build Cloud (GitHub Actions)"
+                    >
+                        <Github className="w-3 h-3" />
+                        <span className="hidden xl:inline">Cloud Build</span>
+                    </button>
+
+                    <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
+
+                    <button 
                       onClick={handleTestBuild}
                       disabled={isTesting}
                       className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold
@@ -288,7 +340,7 @@ Gerado por MineGen AI.
                let iconColor = 'text-gray-400';
                if (fileName?.endsWith('.java')) iconColor = 'text-orange-400';
                else if (fileName?.endsWith('.gradle')) iconColor = 'text-blue-400';
-               else if (fileName?.endsWith('.yml') || fileName?.endsWith('.json')) iconColor = 'text-yellow-400';
+               else if (fileName?.endsWith('.yml') || fileName?.endsWith('.json') || fileName?.endsWith('.yaml')) iconColor = 'text-yellow-400';
 
                return (
                 <button

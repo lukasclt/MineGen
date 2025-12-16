@@ -43,3 +43,37 @@ Você deve responder em Português (PT-BR), mas manter o código e comentários 
 5. **Qualidade de Código**: Escreva código Java limpo e eficiente. Trate nulls e eventos corretamente.
 6. **Formato de Saída**: Você DEVE retornar um objeto JSON contendo uma string 'explanation' e um array 'files'.
 `;
+
+export const GITHUB_ACTION_TEMPLATE = (javaVersion: string) => `name: Build Plugin
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK ${javaVersion}
+      uses: actions/setup-java@v4
+      with:
+        java-version: '${javaVersion}'
+        distribution: 'temurin'
+        
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+      
+    - name: Build with Gradle
+      run: ./gradlew build
+      
+    - name: Upload Build Artifact (JAR)
+      uses: actions/upload-artifact@v4
+      with:
+        name: plugin-jar
+        path: build/libs/*.jar
+`;
