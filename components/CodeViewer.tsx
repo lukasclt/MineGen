@@ -22,6 +22,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [buildLogs, setBuildLogs] = useState<string>("");
   const [showConsole, setShowConsole] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [buildProgress, setBuildProgress] = useState(0);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
@@ -107,6 +108,17 @@ Gerado por MineGen AI.
     URL.revokeObjectURL(url);
   };
 
+  const startProgressSimulation = () => {
+    setBuildProgress(0);
+    return setInterval(() => {
+      setBuildProgress(prev => {
+        if (prev >= 95) return 95; // Stall at 95%
+        // Random increment between 1 and 5
+        return prev + Math.floor(Math.random() * 5) + 1;
+      });
+    }, 400); // Update every 400ms
+  };
+
   const handleTestBuild = async () => {
     if (!project) return;
     
@@ -114,14 +126,16 @@ Gerado por MineGen AI.
     setTestStatus('idle');
     setBuildLogs(`> Inicializando Ambiente Virtual de Build...\n> Verificando estrutura do projeto '${settings.name}'...\n> Task :compileJava\n`);
     
-    // NÃO abrir o console automaticamente (Background mode)
+    // Não abrir o console automaticamente (Background mode)
     // setShowConsole(true); 
     
     setRetryCount(0);
+    setBuildProgress(0);
 
     let currentProjectState = project;
     let attempt = 0;
     let success = false;
+    let progressInterval: NodeJS.Timeout | null = null;
 
     while (attempt <= MAX_RETRIES && !success) {
          setRetryCount(attempt);
@@ -134,8 +148,14 @@ Gerado por MineGen AI.
          await new Promise(r => setTimeout(r, 800));
 
          try {
-             // 1. Simulate Build / Verify Code
+             // --- STEP 1: VERIFY/COMPILE ---
+             setBuildProgress(0); // Reset for this step
+             progressInterval = startProgressSimulation();
+             
              const result = await simulateGradleBuild(currentProjectState, settings);
+             
+             if (progressInterval) clearInterval(progressInterval);
+             setBuildProgress(100); // Complete this step
 
              if (result.success) {
                  success = true;
@@ -144,12 +164,20 @@ Gerado por MineGen AI.
              } else {
                  setBuildLogs(prev => prev + result.logs);
 
-                 // 2. If failed and we have retries left, AUTO-FIX
+                 // --- STEP 2: AUTO-FIX (If failed) ---
                  if (attempt < MAX_RETRIES) {
                      setBuildLogs(prev => prev + `\n> Analisando erros para correção automática...\n`);
                      
+                     // Reset progress for fix phase
+                     setBuildProgress(0);
+                     progressInterval = startProgressSimulation();
+
                      try {
                          const fixedProject = await fixPluginCode(currentProjectState, result.logs, settings);
+                         
+                         if (progressInterval) clearInterval(progressInterval);
+                         setBuildProgress(100);
+
                          currentProjectState = fixedProject;
                          
                          // Update the project in the main state so the user sees the changes immediately
@@ -157,6 +185,7 @@ Gerado por MineGen AI.
 
                          setBuildLogs(prev => prev + `> Patches aplicados. Recompilando...\n--------------------------------------------------\n`);
                      } catch (fixError: any) {
+                         if (progressInterval) clearInterval(progressInterval);
                          setBuildLogs(prev => prev + `\n> Erro Crítico na auto-correção: ${fixError.message}`);
                          break;
                      }
@@ -167,6 +196,7 @@ Gerado por MineGen AI.
                  }
              }
          } catch (err: any) {
+             if (progressInterval) clearInterval(progressInterval);
              setTestStatus('error');
              setBuildLogs(prev => prev + `\n> Erro no Sistema: ${err.message}`);
              setShowConsole(true);
@@ -174,6 +204,8 @@ Gerado por MineGen AI.
          }
          attempt++;
     }
+    
+    if (progressInterval) clearInterval(progressInterval);
     setIsTesting(false);
   };
 
@@ -215,7 +247,7 @@ Gerado por MineGen AI.
                         {isTesting ? (
                           <>
                             <RefreshCw className="w-3 h-3 animate-spin" />
-                            {retryCount > 0 ? `Corrigindo (${retryCount})...` : 'Compilando...'}
+                            {retryCount > 0 ? `Corrigindo (${retryCount}) ${buildProgress}%` : `Compilando ${buildProgress}%`}
                           </>
                         ) : (
                           <>
@@ -317,7 +349,8 @@ Gerado por MineGen AI.
               {isTesting && (
                   <span className="text-purple-400 ml-2 flex items-center gap-2">
                       <RefreshCw className="w-3 h-3 animate-spin" />
-                      Processando...
+                      {retryCount > 0 ? `Corrigindo (${retryCount}/${MAX_RETRIES})` : 'Compilando'}
+                      <span className="text-white font-bold">{buildProgress}%</span>
                   </span>
               )}
               {!isTesting && testStatus === 'success' && <span className="text-green-500 ml-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Build Sucesso</span>}
