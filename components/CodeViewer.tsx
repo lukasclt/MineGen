@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Play, Terminal, XCircle, CheckCircle2, Loader2, RefreshCw, Hammer, Bug } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp } from 'lucide-react';
 import JSZip from 'jszip';
 import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
 
@@ -113,7 +113,10 @@ Gerado por MineGen AI.
     setIsTesting(true);
     setTestStatus('idle');
     setBuildLogs(`> Inicializando Ambiente Virtual de Build...\n> Verificando estrutura do projeto '${settings.name}'...\n> Task :compileJava\n`);
-    setShowConsole(true);
+    
+    // NÃO abrir o console automaticamente (Background mode)
+    // setShowConsole(true); 
+    
     setRetryCount(0);
 
     let currentProjectState = project;
@@ -160,11 +163,13 @@ Gerado por MineGen AI.
                  } else {
                      setBuildLogs(prev => prev + `\n\nBUILD FAILED\nLimite de tentativas de auto-correção atingido. Por favor, revise o código manualmente.`);
                      setTestStatus('error');
+                     setShowConsole(true); // Abre o console automaticamente APENAS se falhar tudo
                  }
              }
          } catch (err: any) {
              setTestStatus('error');
              setBuildLogs(prev => prev + `\n> Erro no Sistema: ${err.message}`);
+             setShowConsole(true);
              break;
          }
          attempt++;
@@ -174,7 +179,7 @@ Gerado por MineGen AI.
 
   if (!project) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-gray-900 text-gray-500 h-full p-8 text-center border-l border-gray-800">
+      <div className="flex-1 flex flex-col items-center justify-center bg-transparent text-gray-500 h-full p-8 text-center border-l border-gray-800">
         <FileCode className="w-16 h-16 mb-4 opacity-20" />
         <p className="text-lg font-medium">Nenhum Código Gerado Ainda</p>
         <p className="text-sm max-w-md mt-2">Comece a conversar para gerar a estrutura do projeto Gradle.</p>
@@ -183,55 +188,67 @@ Gerado por MineGen AI.
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#1e1e1e] border-l border-gray-800 overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-full bg-[#1e1e1e]/95 backdrop-blur-sm border-l border-gray-800 overflow-hidden relative">
         {/* Header */}
-        <div className="h-12 border-b border-gray-700 flex items-center justify-between px-4 bg-[#252526] shrink-0">
+        <div className="h-12 border-b border-gray-700 flex items-center justify-between px-4 bg-[#252526]/90 shrink-0">
             <h3 className="text-sm font-medium text-white flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-mc-accent" />
                 {settings.name} <span className="text-gray-500 text-xs">({settings.version})</span>
             </h3>
             
             <div className="flex items-center gap-2">
-                 {/* Test Build Button */}
-                 <button 
-                  onClick={handleTestBuild}
-                  disabled={isTesting}
-                  className={`text-xs px-4 py-1.5 rounded flex items-center gap-2 transition-colors font-semibold border
-                    ${isTesting 
-                      ? 'bg-purple-900/50 text-purple-200 border-purple-700 cursor-wait' 
-                      : testStatus === 'error' 
-                        ? 'bg-red-900/30 text-red-200 border-red-800 hover:bg-red-900/50'
-                        : testStatus === 'success'
-                          ? 'bg-green-900/30 text-green-200 border-green-800 hover:bg-green-900/50'
-                          : 'bg-mc-panel text-white border-gray-600 hover:bg-gray-700'}`}
-                  title="Executar verificação do compilador IA e Auto-Corretor"
-                >
-                    {isTesting ? (
-                      <>
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                        {retryCount > 0 ? `Corrigindo (${retryCount}/${MAX_RETRIES})...` : 'Verificando...'}
-                      </>
-                    ) : (
-                      <>
-                        {testStatus === 'error' ? <Bug className="w-3 h-3" /> : (testStatus === 'success' ? <CheckCircle2 className="w-3 h-3" /> : <Hammer className="w-3 h-3" />)}
-                        {testStatus === 'error' ? 'Tentar Novamente' : (testStatus === 'success' ? 'Verificado' : 'Testar Build')}
-                      </>
-                    )}
-                </button>
+                 {/* Build Controls */}
+                 <div className="flex items-center bg-black/30 rounded-lg p-0.5 border border-gray-700 mr-2">
+                    <button 
+                      onClick={handleTestBuild}
+                      disabled={isTesting}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold
+                        ${isTesting 
+                          ? 'bg-purple-500/20 text-purple-300' 
+                          : testStatus === 'error' 
+                            ? 'bg-red-500/20 text-red-300 hover:bg-red-500/30'
+                            : testStatus === 'success'
+                              ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
+                              : 'hover:bg-gray-700 text-gray-300'}`}
+                      title="Executar verificação do compilador IA"
+                    >
+                        {isTesting ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            {retryCount > 0 ? `Corrigindo (${retryCount})...` : 'Compilando...'}
+                          </>
+                        ) : (
+                          <>
+                            {testStatus === 'error' ? <Bug className="w-3 h-3" /> : (testStatus === 'success' ? <CheckCircle2 className="w-3 h-3" /> : <Hammer className="w-3 h-3" />)}
+                            {testStatus === 'error' ? 'Falha' : (testStatus === 'success' ? 'Sucesso' : 'Build')}
+                          </>
+                        )}
+                    </button>
+                    
+                    <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
+
+                    <button
+                      onClick={() => setShowConsole(!showConsole)}
+                      className={`p-1.5 rounded-md transition-colors ${showConsole ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                      title="Alternar Terminal"
+                    >
+                      <Terminal className="w-3 h-3" />
+                    </button>
+                 </div>
 
                 <button 
                   onClick={handleDownloadSource}
                   className="text-xs bg-mc-accent hover:bg-blue-600 text-white font-semibold px-4 py-1.5 rounded flex items-center gap-2 transition-colors shadow-lg shadow-blue-900/20"
                   title="Baixar Código Fonte do Projeto (ZIP)"
                 >
-                    <Download className="w-3 h-3" /> Baixar Source
+                    <Download className="w-3 h-3" /> Baixar
                 </button>
             </div>
         </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative z-0">
         {/* File Tree Sidebar */}
-        <div className="w-60 bg-[#252526] border-r border-gray-700 overflow-y-auto flex-shrink-0 custom-scrollbar">
+        <div className="w-60 bg-[#252526]/80 border-r border-gray-700 overflow-y-auto flex-shrink-0 custom-scrollbar">
           <div className="py-2">
             {project.files.map((file, index) => {
                const fileName = file.path.split('/').pop();
@@ -256,10 +273,10 @@ Gerado por MineGen AI.
         </div>
 
         {/* Code Editor Area */}
-        <div className="flex-1 flex flex-col min-w-0 bg-[#1e1e1e]">
+        <div className="flex-1 flex flex-col min-w-0 bg-transparent">
             {selectedFile ? (
                 <>
-                    <div className="h-9 flex items-center justify-between px-4 bg-[#1e1e1e] border-b border-gray-800 shrink-0">
+                    <div className="h-9 flex items-center justify-between px-4 bg-[#1e1e1e]/50 border-b border-gray-800 shrink-0">
                         <span className="text-xs text-gray-400 font-mono">{selectedFile.path}</span>
                         <div className="flex items-center gap-3">
                            {testStatus === 'success' && (
@@ -285,36 +302,31 @@ Gerado por MineGen AI.
             ) : (
                 <div className="flex items-center justify-center h-full text-gray-500 flex-col gap-3">
                     <p>Selecione um arquivo para ver o conteúdo</p>
-                    {testStatus === 'idle' && (
-                      <div className="text-xs text-gray-600 max-w-xs text-center border border-gray-800 p-3 rounded">
-                         Clique em "Testar Build" para verificar o código.
-                      </div>
-                    )}
                 </div>
             )}
         </div>
       </div>
 
-      {/* Build Console / Terminal */}
+      {/* Build Console / Terminal - OVERLAY (Segundo Plano Visual) */}
       {showConsole && (
-        <div className={`border-t border-gray-700 bg-black flex flex-col transition-all duration-300 ease-in-out ${testStatus === 'success' ? 'h-40' : 'h-64'}`}>
-          <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-gray-700 h-10 shrink-0">
+        <div className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl transition-all duration-300 ease-in-out h-64`}>
+          <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
             <div className="flex items-center gap-2 text-xs font-mono">
               <Terminal className="w-3 h-3 text-gray-400" />
-              <span className="text-gray-300">Run: ./gradlew build --dry-run</span>
+              <span className="text-gray-300">Terminal: ./gradlew build</span>
               {isTesting && (
                   <span className="text-purple-400 ml-2 flex items-center gap-2">
                       <RefreshCw className="w-3 h-3 animate-spin" />
-                      Auto-Corrigindo...
+                      Processando...
                   </span>
               )}
-              {!isTesting && testStatus === 'success' && <span className="text-green-500 ml-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Verificação Passou</span>}
-              {!isTesting && testStatus === 'error' && <span className="text-red-500 ml-2 flex items-center gap-1"><XCircle className="w-3 h-3"/> Verificação Falhou</span>}
+              {!isTesting && testStatus === 'success' && <span className="text-green-500 ml-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Build Sucesso</span>}
+              {!isTesting && testStatus === 'error' && <span className="text-red-500 ml-2 flex items-center gap-1"><XCircle className="w-3 h-3"/> Build Falhou</span>}
             </div>
             
             <div className="flex items-center gap-2">
-              <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white">
-                <div className="w-4 h-1 bg-gray-500 rounded-full"></div>
+              <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white transition-colors">
+                <ChevronDown className="w-4 h-4" />
               </button>
             </div>
           </div>
