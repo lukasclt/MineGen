@@ -1,4 +1,3 @@
-
 import OpenAI from 'openai';
 import { PluginSettings, GeneratedProject } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
@@ -17,6 +16,18 @@ const client = new OpenAI({
 const getModel = (settings?: PluginSettings) => {
   // Return the model string from settings, or default to a Gemini model on OpenRouter
   return settings?.aiModel || "google/gemini-2.0-flash-001";
+};
+
+// Helper to sanitize JSON string (remove markdown code blocks)
+const parseJSON = (text: string) => {
+  try {
+    // Remove ```json and ``` or just ```
+    const cleaned = text.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Failed to parse JSON:", text);
+    throw new Error("A IA retornou um formato inválido. Tente novamente.");
+  }
 };
 
 export const generatePluginCode = async (
@@ -63,7 +74,8 @@ export const generatePluginCode = async (
 
   const systemPrompt = `${SYSTEM_INSTRUCTION}
 
-  IMPORTANTE: Responda estritamente com JSON. Schema:
+  IMPORTANTE: Responda estritamente com JSON válido.
+  Formato esperado:
   {
     "explanation": "string (em português)",
     "files": [ { "path": "string", "content": "string", "language": "string" } ]
@@ -83,7 +95,7 @@ export const generatePluginCode = async (
     const text = completion.choices[0]?.message?.content;
     if (!text) throw new Error("Sem resposta da IA");
     
-    return JSON.parse(text);
+    return parseJSON(text);
   } catch (error: any) {
     console.error("Generate Error:", error);
     throw new Error(error.message || "Falha ao gerar o código do plugin via OpenRouter.");
@@ -132,7 +144,7 @@ export const simulateGradleBuild = async (
     const text = completion.choices[0]?.message?.content;
     if (!text) return { success: false, logs: "Erro: Resposta vazia da IA" };
 
-    return JSON.parse(text) as BuildResult;
+    return parseJSON(text) as BuildResult;
   } catch (error) {
     return { success: false, logs: "Erro Interno do Sistema: Não foi possível verificar o build." };
   }
@@ -170,7 +182,7 @@ export const fixPluginCode = async (
     const text = completion.choices[0]?.message?.content;
     if (!text) throw new Error("Sem resposta da IA");
 
-    return JSON.parse(text);
+    return parseJSON(text);
   } catch (error: any) {
      throw new Error("Falha ao corrigir código automaticamente: " + error.message);
   }
