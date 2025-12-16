@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   javaVersion: JavaVersion.JAVA_17,
   description: "Um plugin legal gerado por IA.",
   author: "MineGenAI",
-  aiModel: "google/gemini-2.0-flash-001"
+  aiModel: "gemini-3-pro-preview"
 };
 
 export const MC_VERSIONS = [

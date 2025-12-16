@@ -154,7 +154,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ settings, setSettings, is
               type="text"
               value={settings.aiModel}
               onChange={(e) => handleChange('aiModel', e.target.value)}
-              placeholder="google/gemini-2.0-flash-001"
+              placeholder="gemini-3-pro-preview"
               className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white"
             />
           </div>
