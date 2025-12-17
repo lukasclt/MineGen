@@ -40,7 +40,7 @@ Sua responsabilidade é arquitetar e escrever código Java de alta qualidade, pr
            }
        }
        \`\`\`
-     - Isso garante que o Gradle moderno (que roda em Java 21) consiga compilar para Java 8 ou 11 corretamente.
+     - Isso garante que o Gradle consiga compilar para a versão correta de forma isolada.
 
 2. **Padrões de Plataforma**:
    - Para **Paper/Spigot**:
@@ -91,12 +91,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    # Configuração Híbrida Inteligente:
-    # 1. O Runner do GitHub Actions usa Java 21 (obrigatório para rodar o Gradle 8.5/9.x).
-    # 2. O Gradle usa 'Toolchains' (definido no build.gradle pela IA) para baixar e usar
-    #    automaticamente a versão do Java que o usuário pediu (8, 11, 17, etc) para a compilação.
-    
-    - name: Set up JDK 21 (Runner Environment)
+    # Instalamos primeiro o JDK alvo do plugin (ex: 8, 11, 17)
+    - name: Set up Target JDK (${targetJavaVersion})
+      uses: actions/setup-java@v4
+      with:
+        java-version: '${targetJavaVersion}'
+        distribution: 'temurin'
+        
+    # Instalamos por último o JDK 21 para garantir que ele seja o padrão do ambiente (JAVA_HOME)
+    # permitindo que o Gradle 8.5+ rode sem erros de "JVM 17 or later required".
+    - name: Set up Runner JDK (21)
       uses: actions/setup-java@v4
       with:
         java-version: '21'
@@ -106,7 +110,7 @@ jobs:
       uses: gradle/actions/setup-gradle@v3
       
     - name: Build with Gradle
-      # --no-daemon economiza memória no CI
+      # O Gradle usará o Java 21 para rodar e o Toolchain (definido no build.gradle) para compilar.
       run: gradle build --no-daemon
       
     - name: Upload Build Artifact (JAR)
