@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
 import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github, UploadCloud, PlayCircle, Loader2, ArrowUpCircle } from 'lucide-react';
@@ -62,20 +61,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
   };
 
-  // 1. Ensure Workflow file exists
-  const ensureWorkflowFile = () => {
-    if (!project || !onProjectUpdate) return false;
-    const workflowPath = ".github/workflows/build.yml";
-    if (!project.files.some(f => f.path === workflowPath)) {
-        const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
-        const newFile: GeneratedFile = { path: workflowPath, content: workflowContent, language: 'yaml' };
-        const updatedProject = { ...project, files: [...project.files, newFile] };
-        onProjectUpdate(updatedProject);
-        return true; // Added
-    }
-    return false; // Existed
-  };
-
   // 2. Commit & Push
   const handleCommitAndPush = async () => {
     if (!settings.github?.isConnected || !project) {
@@ -83,15 +68,31 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         return;
     }
     
-    // Ensure workflow exists before push
-    ensureWorkflowFile();
+    // PREPARE FILES: Force update Workflow to ensure valid build command
+    const workflowPath = ".github/workflows/build.yml";
+    const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
+    
+    let filesToPush = [...project.files];
+    const workflowIndex = filesToPush.findIndex(f => f.path === workflowPath);
+    
+    // Upsert the workflow file with the CORRECT content
+    if (workflowIndex >= 0) {
+        filesToPush[workflowIndex] = { ...filesToPush[workflowIndex], content: workflowContent };
+    } else {
+        filesToPush.push({ path: workflowPath, content: workflowContent, language: 'yaml' });
+    }
+
+    // Update local state so user sees the change
+    if (onProjectUpdate) {
+        onProjectUpdate({ ...project, files: filesToPush });
+    }
 
     setIsCommitting(true);
     setBuildLogs(prev => prev + `\n> Iniciando Commit e Push para ${settings.github!.repoName}...\n`);
     setShowConsole(true);
 
     try {
-        await commitAndPushFiles(settings.github!, project.files, `Update plugin: ${new Date().toISOString()}`);
+        await commitAndPushFiles(settings.github!, filesToPush, `Update plugin: ${new Date().toISOString()}`);
         setBuildLogs(prev => prev + `> Arquivos enviados com sucesso!\n> O GitHub Actions deve iniciar em breve.\n`);
         setBuildStatus('queued');
         
@@ -167,8 +168,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     if (!project) return;
     const zip = new JSZip();
     project.files.forEach(file => zip.file(file.path, file.content));
-    zip.file("gradlew", `#!/bin/sh\n# Gradle Wrapper Script\nexec gradle "$@"\n`);
-    zip.file("gradlew.bat", `@if "%DEBUG%" == "" @echo off\ngradle %*\n`);
+    // Include dummy gradlew for manual usage if user wants, but ideally they use installed gradle
+    zip.file("gradlew", `#!/bin/sh\necho "Please use 'gradle build' command directly as wrapper is not included."\n`);
     const blob = await zip.generateAsync({type:"blob"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

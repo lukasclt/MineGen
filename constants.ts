@@ -85,12 +85,14 @@ jobs:
       with:
         java-version: '${javaVersion}'
         distribution: 'temurin'
-        
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+    
+    # Setup Gradle (creates wrapper if missing or uses system)
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
       
+    # Usamos 'gradle' diretamente pois o wrapper (gradlew) não é gerado pela IA
     - name: Build with Gradle
-      run: ./gradlew build
+      run: gradle build --no-daemon
       
     - name: Upload Build Artifact (JAR)
       uses: actions/upload-artifact@v4

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'minegen-v1';
+const CACHE_NAME = 'minegen-v2';
 const urlsToCache = [
   '/',
   '/index.html',
