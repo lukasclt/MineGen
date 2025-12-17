@@ -24,10 +24,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   const [buildProgress, setBuildProgress] = useState(0);
   
-  // Eternal Fix State
+  // Eternal Fix State - Using Refs to prevent stale closures in setInterval
   const [isEternalMode, setIsEternalMode] = useState(false);
+  const eternalModeRef = useRef(false);
   const [fixAttempt, setFixAttempt] = useState(0);
+  const fixAttemptRef = useRef(0);
   const [isFixing, setIsFixing] = useState(false);
+  
+  // Current project ref to always have latest project state in async calls
+  const projectRef = useRef(project);
+  useEffect(() => { projectRef.current = project; }, [project]);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +73,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
 
   // 1. Commit & Push
   const handleCommitAndPush = async (silent = false) => {
-    if (!settings.github?.isConnected || !project) {
+    if (!settings.github?.isConnected || !projectRef.current) {
         if (!silent) alert("GitHub não conectado.");
         return;
     }
@@ -75,7 +81,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     const workflowPath = ".github/workflows/build.yml";
     const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
     
-    let filesToPush = [...project.files];
+    let filesToPush = [...projectRef.current.files];
     const workflowIndex = filesToPush.findIndex(f => f.path === workflowPath);
     
     if (workflowIndex >= 0) {
@@ -85,23 +91,24 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
 
     if (onProjectUpdate) {
-        onProjectUpdate({ ...project, files: filesToPush });
+        onProjectUpdate({ ...projectRef.current, files: filesToPush });
     }
 
     setIsCommitting(true);
     setBuildProgress(0);
     if (!silent) setShowConsole(true);
-    setBuildLogs(prev => prev + `\n> [Round ${fixAttempt}] Enviando código (Java ${settings.javaVersion})...\n`);
+    setBuildLogs(prev => prev + `\n> [Round ${fixAttemptRef.current}] Enviando código (Java ${settings.javaVersion})...\n`);
     setBuildStatus('queued');
 
     try {
-        await commitAndPushFiles(settings.github!, filesToPush, `Auto-fix attempt #${fixAttempt}`);
+        await commitAndPushFiles(settings.github!, filesToPush, `Auto-fix attempt #${fixAttemptRef.current}`);
         setBuildLogs(prev => prev + `> Arquivos no GitHub. Iniciando Worker de Build...\n`);
         pollBuildStatus();
     } catch (e: any) {
         setBuildLogs(prev => prev + `> 🛑 ERRO no Push: ${e.message}\n`);
         setBuildStatus('idle');
         setIsEternalMode(false);
+        eternalModeRef.current = false;
     } finally {
         setIsCommitting(false);
     }
@@ -117,10 +124,11 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       const pollInterval = setInterval(async () => {
           attempts++;
           
-          // Simulação de porcentagem baseada em tempo médio de build (90s)
+          // Simulação de porcentagem
           if (progressSim < 95) {
-              progressSim += Math.random() * 2;
-              setBuildProgress(Math.min(99, Math.round(progressSim)));
+              progressSim += 1 + (Math.random() * 3);
+              const p = Math.min(99, Math.round(progressSim));
+              setBuildProgress(p);
           }
 
           try {
@@ -136,21 +144,22 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                          setBuildStatus('success');
                          setBuildLogs(prev => prev + `> ✅ JAR COMPILADO COM SUCESSO!\n`);
                          setIsEternalMode(false);
+                         eternalModeRef.current = false;
                          const url = await getBuildArtifact(settings.github!, run.id);
                          if (url) setArtifactUrl(url);
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ Falha detectada no Maven.\n`);
                          
-                         if (isEternalMode) {
-                             // Feedback imediato antes de chamar a função
+                         // CRITICAL FIX: Use ref to check if mode is still active
+                         if (eternalModeRef.current) {
                              setBuildLogs(prev => prev + `> 🔄 MODO ETERNO: Acionando IA para correção imediata...\n`);
                              handleAutoFix();
                          }
                      }
                  } else {
                      setBuildStatus('in_progress');
-                     if (attempts % 4 === 0) {
+                     if (attempts % 3 === 0) {
                          setBuildLogs(prev => prev + `> Compilando... [${Math.round(progressSim)}%]\n`);
                      }
                  }
@@ -161,38 +170,40 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
               clearInterval(pollInterval);
               setBuildLogs(prev => prev + `> 🛑 Timeout: Build interrompido.\n`);
               setIsEternalMode(false);
+              eternalModeRef.current = false;
           }
       }, 3000);
   };
 
   // 3. Auto Fix & Loop
   const handleAutoFix = async () => {
-      if (!project || !buildLogs) return;
+      if (!projectRef.current || !buildLogs) return;
       
       setIsFixing(true);
-      setFixAttempt(prev => prev + 1);
+      const nextAttempt = fixAttemptRef.current + 1;
+      setFixAttempt(nextAttempt);
+      fixAttemptRef.current = nextAttempt;
       
-      // Mensagem clara no terminal
-      const msg = `\n> 🤖 IA CORRIGINDO (Tentativa #${fixAttempt + 1})...\n> Analisando logs de erro do Maven...\n`;
-      setBuildLogs(prev => prev + msg);
+      setBuildLogs(prev => prev + `\n> 🤖 IA CORRIGINDO (Tentativa #${nextAttempt})...\n> Analisando logs de erro do Maven para Java ${settings.javaVersion}...\n`);
       
       try {
-          const relevantLogs = buildLogs.slice(-4000); 
-          const fixedProject = await fixPluginCode(project, relevantLogs, settings);
+          const relevantLogs = buildLogs.slice(-5000); 
+          const fixedProject = await fixPluginCode(projectRef.current, relevantLogs, settings);
           
           if (onProjectUpdate) {
               onProjectUpdate(fixedProject);
           }
           
-          setBuildLogs(prev => prev + `> 🧠 IA: Problemas corrigidos no código. Reiniciando build...\n`);
+          setBuildLogs(prev => prev + `> 🧠 IA: Problemas corrigidos. Reiniciando build automático...\n`);
           
           setTimeout(() => {
               handleCommitAndPush(true);
-          }, 1500);
+          }, 2000);
           
       } catch (e: any) {
           setBuildLogs(prev => prev + `> ❌ Erro Crítico na IA: ${e.message}\n`);
           setIsEternalMode(false);
+          eternalModeRef.current = false;
       } finally {
           setIsFixing(false);
       }
@@ -201,14 +212,17 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const toggleEternalMode = () => {
       if (!isEternalMode) {
           setIsEternalMode(true);
-          setFixAttempt(1);
+          eternalModeRef.current = true;
+          setFixAttempt(0);
+          fixAttemptRef.current = 0;
           setBuildLogs(prev => prev + "\n> ♾️ MODO ETERNO ATIVADO: A IA entrará em loop de correção até o sucesso.\n");
-          if (buildStatus === 'failure' || buildStatus === 'idle') {
+          if (buildStatus === 'failure' || buildStatus === 'idle' || buildStatus === 'success') {
               handleCommitAndPush();
           }
       } else {
           setIsEternalMode(false);
-          setBuildLogs(prev => prev + "\n> 🛑 Modo Eterno desativado.\n");
+          eternalModeRef.current = false;
+          setBuildLogs(prev => prev + "\n> 🛑 Modo Eterno desativado pelo usuário.\n");
       }
   };
 
@@ -220,9 +234,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   };
 
   const handleDownloadSource = async () => {
-    if (!project) return;
+    if (!projectRef.current) return;
     const zip = new JSZip();
-    project.files.forEach(file => zip.file(file.path, file.content));
+    projectRef.current.files.forEach(file => zip.file(file.path, file.content));
     const blob = await zip.generateAsync({type:"blob"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -269,9 +283,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                             <Download className="w-3 h-3" /> <span>Download JAR</span>
                          </button>
                     ) : (
-                         <button onClick={() => { setShowConsole(true); handleCommitAndPush(); }} disabled={!settings.github?.isConnected || isFixing} className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'in_progress' ? 'text-yellow-400' : buildStatus === 'failure' ? 'text-red-400' : 'text-gray-300 hover:bg-gray-700'}`}>
-                            {buildStatus === 'in_progress' ? <RefreshCw className="w-3 h-3 animate-spin"/> : <PlayCircle className="w-3 h-3" />}
-                            <span className="hidden xl:inline">{buildStatus === 'in_progress' ? `Compilando (${buildProgress}%)` : 'Build Maven'}</span>
+                         <button onClick={() => { setShowConsole(true); handleCommitAndPush(); }} disabled={!settings.github?.isConnected || isFixing} className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'in_progress' || buildStatus === 'queued' ? 'text-yellow-400' : buildStatus === 'failure' ? 'text-red-400' : 'text-gray-300 hover:bg-gray-700'}`}>
+                            {buildStatus === 'in_progress' || buildStatus === 'queued' ? <RefreshCw className="w-3 h-3 animate-spin"/> : <PlayCircle className="w-3 h-3" />}
+                            <span className="hidden xl:inline">{buildStatus === 'in_progress' || buildStatus === 'queued' ? `Compilando (${buildProgress}%)` : 'Build Maven'}</span>
                          </button>
                     )}
 
@@ -291,7 +305,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       <div className="flex-1 flex overflow-hidden relative z-0">
         <div className="w-60 bg-[#252526]/80 border-r border-gray-700 overflow-y-auto flex-shrink-0 custom-scrollbar">
           <div className="py-2">
-            {project.files.map((file, index) => {
+            {project?.files.map((file, index) => {
                const fileName = file.path.split('/').pop();
                const isSelected = selectedFile?.path === file.path;
                let iconColor = 'text-gray-400';
@@ -329,20 +343,20 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       </div>
 
       {showConsole && (
-        <div className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl transition-all duration-300 h-64`}>
+        <div className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl transition-all duration-300 h-72`}>
           <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
             <div className="flex items-center gap-3 text-xs font-mono">
               <Terminal className="w-3 h-3 text-gray-400" />
               <span className="text-gray-300">Terminal: Maven Logs</span>
               
-              {buildStatus === 'in_progress' && (
+              {(buildStatus === 'in_progress' || buildStatus === 'queued') && (
                 <span className="text-yellow-400 font-bold ml-2">Progress: {buildProgress}%</span>
               )}
 
               {isEternalMode && (
                   <div className="flex items-center gap-2 bg-purple-500/10 border border-purple-500/30 px-2 py-0.5 rounded animate-pulse">
                       <Sparkles className="w-3 h-3 text-purple-400" />
-                      <span className="text-purple-300 text-[10px] font-bold">ETERNAL MODE ACTIVE (Round {fixAttempt})</span>
+                      <span className="text-purple-300 text-[10px] font-bold uppercase tracking-wider">Eternal Active (Attempt #{fixAttempt})</span>
                   </div>
               )}
             </div>
@@ -350,9 +364,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
             <div className="flex items-center gap-2">
               <button 
                 onClick={toggleEternalMode}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all border ${isEternalMode ? 'bg-red-500/20 border-red-500/50 text-red-300' : 'bg-purple-500/20 border-purple-500/50 text-purple-300 hover:bg-purple-500/40'}`}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all border ${isEternalMode ? 'bg-red-500/20 border-red-500/50 text-red-300' : 'bg-purple-500/20 border-purple-500/50 text-purple-300 hover:bg-purple-500/40'}`}
               >
-                 {isEternalMode ? <><StopCircle className="w-3 h-3" /> Parar Loop</> : <><RotateCcw className="w-3 h-3" /> Loop de Auto-Correção</>}
+                 {isEternalMode ? <><StopCircle className="w-3 h-3" /> Parar Loop</> : <><RotateCcw className="w-3 h-3" /> Auto-Fix Loop</>}
               </button>
               
               <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white">
@@ -360,15 +374,28 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] text-gray-300 custom-scrollbar">
-            <pre className="whitespace-pre-wrap">{buildLogs || "> Aguardando comandos..."}</pre>
+          <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-300 custom-scrollbar bg-black/40">
+            <pre className="whitespace-pre-wrap">{buildLogs || "> Console pronto para build Maven..."}</pre>
             {isFixing && (
-                <div className="flex items-center gap-2 text-purple-400 mt-2 animate-pulse font-bold">
-                    <Wand2 className="w-3 h-3" /> IA está analisando e corrigindo o código agora...
+                <div className="flex flex-col gap-1 mt-3">
+                  <div className="flex items-center gap-2 text-purple-400 animate-pulse font-bold">
+                      <Wand2 className="w-4 h-4" /> IA ESTÁ ANALISANDO E CORRIGINDO O CÓDIGO AGORA...
+                  </div>
+                  <div className="w-48 h-1 bg-purple-900/50 rounded-full overflow-hidden">
+                    <div className="h-full bg-purple-500 animate-[loading_2s_ease-in-out_infinite]" />
+                  </div>
                 </div>
             )}
             <div ref={consoleEndRef} />
           </div>
+          
+          <style>{`
+            @keyframes loading {
+              0% { width: 0%; transform: translateX(-100%); }
+              50% { width: 100%; transform: translateX(0); }
+              100% { width: 0%; transform: translateX(100%); }
+            }
+          `}</style>
         </div>
       )}
     </div>
