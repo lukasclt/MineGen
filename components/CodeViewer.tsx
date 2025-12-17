@@ -210,6 +210,18 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     </button>
                     
                     <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
+
+                    <button 
+                      onClick={handleAutoFix}
+                      disabled={buildStatus !== 'failure' || isFixing}
+                      className={`text-xs px-2 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'failure' ? 'text-red-400 hover:bg-red-500/10 animate-pulse' : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
+                      title="Auto-Fix: Corrigir erros de build via IA"
+                    >
+                        <Wrench className="w-3 h-3" />
+                        <span className="hidden lg:inline">Fix</span>
+                    </button>
+
+                    <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
                     
                     <button 
                       onClick={() => setAutoFixEterno(!autoFixEterno)} 
@@ -221,15 +233,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                         <span className="hidden lg:inline">Eterno</span>
                     </button>
                  </div>
-
-                {buildStatus === 'failure' && !isFixing && (
-                    <button 
-                      onClick={handleAutoFix}
-                      className="text-xs bg-red-600 hover:bg-red-500 text-white font-bold px-3 py-1.5 rounded flex items-center gap-2 animate-bounce shadow-lg shadow-red-900/20"
-                    >
-                        <Wrench className="w-3 h-3" /> Auto-Fix
-                    </button>
-                )}
 
                 <button onClick={handleDownloadSource} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold px-3 py-1.5 rounded flex items-center gap-2 transition-colors">
                     <Download className="w-3 h-3" /> Fonte
