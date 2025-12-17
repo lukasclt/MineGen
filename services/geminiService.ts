@@ -93,31 +93,29 @@ export const fixPluginCode = async (
 
   const prompt = `
 # CONTEXTO
-O build do Maven falhou para o plugin "${settings.name}" (${settings.platform}, Java ${settings.javaVersion}).
+O build do Maven falhou para o projeto "${settings.name}" na versão ${settings.mcVersion}.
 
-# TAREFA DE DEBUG (PROMPT TIPO C)
-1. **CONSTRAINTS**: Analise os logs de erro e localize falhas de compilação ou dependências ausentes.
-2. **CONTENT**: No campo "explanation", descreva detalhadamente:
-   - Qual erro foi detectado.
-   - Por que ele ocorreu.
-   - O que você alterou para resolver (ex: "Corrigi o import faltante na Main.java e atualizei o repositório no pom.xml").
-3. **PRESERVAÇÃO**: Retorne TODOS os arquivos do projeto em "files".
+# TAREFA (DEBUGGING PROFUNDO)
+1. Analise os logs de erro anexados.
+2. No campo "explanation", explique exatamente o erro que você encontrou (ex: "A dependência X não foi encontrada no Maven Central") e o que você fez para resolver (ex: "Adicionei o repositório Y ao pom.xml").
+3. Aplique a correção técnica em todos os arquivos afetados.
+
+# RESTRIÇÕES
+- Preservação: Retorne a lista COMPLETA de arquivos ("files").
+- Qualidade: Siga as melhores práticas de desenvolvimento Minecraft Java.
 
 # LOGS DE ERRO
 ${buildLogs}
 
-# CÓDIGO ATUAL
+# CÓDIGO ATUAL DO PROJETO
 ${fileContext}
-
-# SOLICITAÇÃO
-Aplique o patch de correção agora.
   `;
 
   try {
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Engenheiro de Software Sênior especializado em Troubleshooting. Seja técnico e preciso na explicação." },
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Engenheiro de Software Sênior com foco em Debugging." },
         { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" }

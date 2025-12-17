@@ -129,7 +129,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ FALHA: Build falhou. Analisando logs para Auto-Fix...\n`);
-                         handleAutoFix();
+                         // Aguarda 3 segundos para dar o "efeito" de análise antes de disparar o Auto-Fix automático
+                         setTimeout(handleAutoFix, 3000);
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -154,15 +155,15 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         
         // Extrair apenas as partes mais relevantes dos logs para não estourar contexto
         const lines = realLogs.split('\n');
-        const errorStartIndex = lines.findIndex(l => l.includes('[ERROR]') || l.includes('Compilation failure'));
+        const errorStartIndex = lines.findIndex(l => l.includes('[ERROR]') || l.includes('Compilation failure') || l.includes('Could not resolve dependencies'));
         let relevantLogs = realLogs;
         if (errorStartIndex !== -1) {
-            relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5)).join('\n');
+            relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5), errorStartIndex + 40).join('\n');
         }
         
-        // Se ainda for muito grande, pega os últimos 4000 caracteres
-        if (relevantLogs.length > 5000) {
-            relevantLogs = relevantLogs.substring(relevantLogs.length - 5000);
+        // Se ainda for muito grande, corta
+        if (relevantLogs.length > 6000) {
+            relevantLogs = relevantLogs.substring(0, 6000);
         }
         
         isFixingInProgressRef.current = true;

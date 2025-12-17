@@ -30,12 +30,12 @@ const REASONING_STEPS = [
 
 const FIX_REASONING_STEPS = [
   "Injetando logs de erro no núcleo da IA...",
-  "Varrendo pom.xml em busca de dependências quebradas...",
-  "Localizando falhas de compilação nas classes Java...",
-  "Cruzando erros com a versão do Minecraft alvo...",
+  "Analizando pilha de erros (Stack Trace)...",
+  "Identificando falhas de compilação ou dependências...",
+  "Mapeando correções necessárias no pom.xml e código...",
   "Gerando patch de correção estrutural...",
-  "Revisando integridade do workspace...",
-  "Validando correção contra os logs originais..."
+  "Validando integridade do projeto corrigido...",
+  "Finalizando reparo automático..."
 ];
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -89,9 +89,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
-    // Mensagem visual no chat com logs
+    // Se for Auto-Fix, mostramos os logs no balão azul (usuário) conforme solicitado
     const displayMessageText = isFix 
-      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`\n${text}\n\`\`\``
+      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`bash\n${text}\n\`\`\``
       : text;
 
     const userMessage: ChatMessage = { 
@@ -105,7 +105,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsLoading(true);
     setIsFixingMode(isFix);
     setProgress(0);
-    setLoadingText(isFix ? 'Debugando Erros...' : (currentProject ? 'Refatorando...' : 'Codificando...'));
+    setLoadingText(isFix ? 'Debugando Erros...' : (currentProject ? 'Aprimorando...' : 'Codificando...'));
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
@@ -193,7 +193,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {msg.projectData && (
                   <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center justify-between text-[11px]">
                     <div className="text-mc-green font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Alterações Aplicadas
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Patch Aplicado
                     </div>
                   </div>
                 )}
@@ -232,7 +232,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
                   <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2">
                     <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-widest opacity-80">
-                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} Deep Debugging
+                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} {isFixingMode ? "Análise de Erros" : "Pensamento Computacional"}
                     </div>
                     <div className="flex items-start gap-2 min-h-[30px]">
                       <TerminalIcon className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />
@@ -258,7 +258,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       <div className="absolute bottom-0 left-0 right-0 p-4 pt-10 bg-gradient-to-t from-mc-dark via-mc-dark to-transparent z-10">
         <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto">
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={currentProject ? "Ex: Adicione um comando /spawn..." : "Crie um plugin..."} className="w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent text-sm" disabled={isLoading} />
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={currentProject ? "Diga o que quer alterar..." : "Crie um plugin..."} className="w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent text-sm" disabled={isLoading} />
           <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-colors disabled:opacity-50 flex items-center justify-center">
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
