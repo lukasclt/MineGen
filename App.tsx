@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Menu } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
@@ -15,7 +16,9 @@ const generateUUID = () => {
 };
 
 const App: React.FC = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(sidebarOpen => window.innerWidth > 768);
+  // Fix: Initializer for useState should be a parameterless function or a value. 
+  // This fix ensures sidebarOpen is correctly inferred as a boolean.
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => window.innerWidth > 768);
   const [isLoaded, setIsLoaded] = useState(false);
   
   // Projects State

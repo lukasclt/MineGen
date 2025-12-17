@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon } from 'lucide-react';
+import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode } from '../services/geminiService';
 
 interface ChatInterfaceProps {
@@ -60,15 +61,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
     return () => clearInterval(interval);
   }, [isLoading]);
-
-  // Handle first user message to name the project automatically
-  useEffect(() => {
-    if (messages.length === 2 && messages[1].role === 'user') {
-      const firstUserMsg = messages[1].text;
-      const suggestedName = firstUserMsg.split(' ').slice(0, 4).join(' ').substring(0, 25);
-      if (suggestedName) onUpdateProjectName(suggestedName);
-    }
-  }, [messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,57 +126,79 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24 custom-scrollbar">
-        {messages.map((msg, idx) => (
-          <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {msg.role === 'model' && (
-              <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center flex-shrink-0 border border-gray-700 mt-1 shadow-lg">
-                {msg.isError ? <AlertCircle className="w-5 h-5 text-red-500" /> : <Bot className="w-5 h-5 text-mc-accent" />}
-              </div>
-            )}
-            <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-lg backdrop-blur-sm ${msg.role === 'user' ? 'bg-mc-accent text-white rounded-br-none' : msg.isError ? 'bg-red-900/30 border border-red-500/50 text-red-200 rounded-bl-none' : 'bg-mc-panel/90 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
-              <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-              {msg.projectData && (
-                <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center gap-2 text-xs text-mc-green font-medium">
-                  <Sparkles className="w-3 h-3" /> Alterações Aplicadas
+        <AnimatePresence initial={false}>
+          {messages.map((msg, idx) => (
+            <motion.div 
+              key={idx}
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              {msg.role === 'model' && (
+                <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center flex-shrink-0 border border-gray-700 mt-1 shadow-lg">
+                  {msg.isError ? <AlertCircle className="w-5 h-5 text-red-500" /> : <Bot className="w-5 h-5 text-mc-accent" />}
                 </div>
               )}
-            </div>
-            {msg.role === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1 shadow-lg"><User className="w-5 h-5 text-gray-300" /></div>
-            )}
-          </div>
-        ))}
+              <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-lg backdrop-blur-sm ${msg.role === 'user' ? 'bg-mc-accent text-white rounded-br-none' : msg.isError ? 'bg-red-900/30 border border-red-500/50 text-red-200 rounded-bl-none' : 'bg-mc-panel/90 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                {msg.projectData && (
+                  <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center gap-2 text-xs text-mc-green font-medium">
+                    <Sparkles className="w-3 h-3" /> Alterações Aplicadas
+                  </div>
+                )}
+              </div>
+              {msg.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1 shadow-lg"><User className="w-5 h-5 text-gray-300" /></div>
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+
         {isLoading && (
-          <div className="flex flex-col gap-2 max-w-[85%]">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex flex-col gap-2 max-w-[85%]"
+          >
             <div className="flex gap-4 items-start">
                <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center border border-gray-700 shadow-lg mt-1"><Cpu className="w-5 h-5 text-mc-accent animate-pulse" /></div>
                <div className="bg-mc-panel/90 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 flex flex-col gap-3 min-w-[280px]">
-                  {/* Cabeçalho de Status */}
                   <div className="flex justify-between items-center text-xs text-gray-400 font-mono">
                     <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin text-mc-accent" /> {loadingText}</span>
                     <span className="text-mc-accent font-bold">{Math.round(progress)}%</span>
                   </div>
                   
-                  {/* Barra de Progresso */}
                   <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                    <div className="h-full bg-mc-accent transition-all duration-300 shadow-[0_0_8px_rgba(59,130,246,0.5)]" style={{ width: `${progress}%` }} />
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      className="h-full bg-mc-accent shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
+                    />
                   </div>
 
-                  {/* Seção de Raciocínio da IA */}
                   <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2">
                     <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-widest opacity-80">
                       <BrainCircuit className="w-3 h-3" /> Raciocínio da IA
                     </div>
                     <div className="flex items-start gap-2 min-h-[30px]">
                       <TerminalIcon className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />
-                      <span className="text-[11px] text-gray-300 font-mono leading-tight italic">
-                        {REASONING_STEPS[reasoningStep]}
-                      </span>
+                      <AnimatePresence mode="wait">
+                        <motion.span 
+                          key={reasoningStep}
+                          initial={{ opacity: 0, x: 5 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -5 }}
+                          className="text-[11px] text-gray-300 font-mono leading-tight italic"
+                        >
+                          {REASONING_STEPS[reasoningStep]}
+                        </motion.span>
+                      </AnimatePresence>
                     </div>
                   </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
         <div ref={messagesEndRef} />
       </div>

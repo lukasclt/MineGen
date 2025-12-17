@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
 import { FileCode, Copy, Check, FolderOpen, Download, Terminal, RefreshCw, PlayCircle, Loader2, UploadCloud, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import JSZip from 'jszip';
 import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact } from '../services/githubService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
@@ -12,10 +13,9 @@ interface CodeViewerProps {
 }
 
 const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpdate }) => {
-  const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
-  // GitHub / Build State
   const [isCommitting, setIsCommitting] = useState(false);
   const [buildStatus, setBuildStatus] = useState<'idle' | 'queued' | 'in_progress' | 'success' | 'failure'>('idle');
   const [buildLogs, setBuildLogs] = useState<string>("");
@@ -26,16 +26,18 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const buildInProgressRef = useRef(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
+  // Encontrar o arquivo atual baseado no path selecionado
+  const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
+
   useEffect(() => {
     if (project && project.files.length > 0) {
-      const currentPath = selectedFile?.path;
-      const fileExists = project.files.find(f => f.path === currentPath);
-      if (!selectedFile || !fileExists) {
+      // Se nada estiver selecionado ou o arquivo atual não existir mais, seleciona o principal
+      if (!selectedFilePath || !project.files.some(f => f.path === selectedFilePath)) {
           const mainFile = project.files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || project.files[0];
-          setSelectedFile(mainFile);
-      } else if (fileExists.content !== selectedFile?.content) {
-          setSelectedFile(fileExists);
+          setSelectedFilePath(mainFile.path);
       }
+    } else {
+      setSelectedFilePath(null);
     }
   }, [project]);
 
@@ -62,7 +64,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
     
     buildInProgressRef.current = true;
-
     const workflowPath = ".github/workflows/build.yml";
     const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
     
@@ -201,54 +202,81 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           <div className="py-2">
             {project?.files.map((file, index) => {
                const fileName = file.path.split('/').pop();
-               const isSelected = selectedFile?.path === file.path;
+               const isSelected = selectedFilePath === file.path;
                let iconColor = 'text-gray-400';
                if (fileName?.endsWith('.java')) iconColor = 'text-orange-400';
                else if (fileName?.endsWith('.xml')) iconColor = 'text-blue-400';
                return (
-                <button key={index} onClick={() => setSelectedFile(file)} className={`w-full text-left px-4 py-1.5 text-sm flex items-center gap-2 truncate hover:bg-[#2a2d2e] transition-colors ${isSelected ? 'bg-[#37373d] text-white border-l-2 border-mc-accent' : 'text-gray-400 border-l-2 border-transparent'}`}>
+                <motion.button 
+                  key={file.path} 
+                  initial={{ x: -10, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: index * 0.03 }}
+                  onClick={() => setSelectedFilePath(file.path)} 
+                  className={`w-full text-left px-4 py-1.5 text-sm flex items-center gap-2 truncate hover:bg-[#2a2d2e] transition-colors ${isSelected ? 'bg-[#37373d] text-white border-l-2 border-mc-accent' : 'text-gray-400 border-l-2 border-transparent'}`}
+                >
                     <FileCode className={`w-4 h-4 ${iconColor}`} />
                     <span className="truncate">{fileName}</span>
-                </button>
+                </motion.button>
                )
             })}
           </div>
         </div>
-        <div className="flex-1 flex flex-col min-w-0 bg-transparent">
-            {selectedFile ? (
-                <>
-                    <div className="h-9 flex items-center justify-between px-4 bg-[#1e1e1e]/50 border-b border-gray-800 shrink-0">
-                        <span className="text-xs text-gray-400 font-mono">{selectedFile.path}</span>
-                        <button onClick={handleCopy} className="text-gray-400 hover:text-white transition-colors"><Copy className="w-4 h-4" /></button>
-                    </div>
-                    <div className="flex-1 overflow-auto p-4 custom-scrollbar">
-                        <pre className="font-mono text-sm text-gray-300 leading-relaxed"><code>{selectedFile.content}</code></pre>
-                    </div>
-                </>
-            ) : (
-                <div className="flex items-center justify-center h-full text-gray-500">Selecione um arquivo</div>
-            )}
+        <div className="flex-1 flex flex-col min-w-0 bg-transparent relative">
+            <AnimatePresence mode="wait">
+              {selectedFile ? (
+                  <motion.div 
+                    key={selectedFile.path + "-" + selectedFile.content.length} // Força re-trigger se mudar
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex-1 flex flex-col h-full"
+                  >
+                      <div className="h-9 flex items-center justify-between px-4 bg-[#1e1e1e]/50 border-b border-gray-800 shrink-0">
+                          <span className="text-xs text-gray-400 font-mono">{selectedFile.path}</span>
+                          <button onClick={handleCopy} className="text-gray-400 hover:text-white transition-colors">
+                            {copied ? <Check className="w-4 h-4 text-mc-green" /> : <Copy className="w-4 h-4" />}
+                          </button>
+                      </div>
+                      <div className="flex-1 overflow-auto p-4 custom-scrollbar bg-black/10">
+                          <pre className="font-mono text-sm text-gray-300 leading-relaxed whitespace-pre select-text">
+                            <code>{selectedFile.content}</code>
+                          </pre>
+                      </div>
+                  </motion.div>
+              ) : (
+                  <div className="flex items-center justify-center h-full text-gray-500">Selecione um arquivo</div>
+              )}
+            </AnimatePresence>
         </div>
       </div>
 
-      {showConsole && (
-        <div className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl transition-all duration-300 h-72`}>
-          <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
-            <div className="flex items-center gap-3 text-xs font-mono">
-              <Terminal className="w-3 h-3 text-gray-400" />
-              <span className="text-gray-300">Terminal: Maven Logs</span>
-              {(buildStatus === 'in_progress' || buildStatus === 'queued') && <span className="text-yellow-400 font-bold ml-2">Progress: {buildProgress}%</span>}
+      <AnimatePresence>
+        {showConsole && (
+          <motion.div 
+            initial={{ y: 300 }}
+            animate={{ y: 0 }}
+            exit={{ y: 300 }}
+            className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl h-72`}
+          >
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
+              <div className="flex items-center gap-3 text-xs font-mono">
+                <Terminal className="w-3 h-3 text-gray-400" />
+                <span className="text-gray-300">Terminal: Maven Logs</span>
+                {(buildStatus === 'in_progress' || buildStatus === 'queued') && <span className="text-yellow-400 font-bold ml-2">Progress: {buildProgress}%</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-300 custom-scrollbar bg-black/40">
+              <pre className="whitespace-pre-wrap">{buildLogs || "> Pronto para build Maven..."}</pre>
+              <div ref={consoleEndRef} />
             </div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-300 custom-scrollbar bg-black/40">
-            <pre className="whitespace-pre-wrap">{buildLogs || "> Pronto para build Maven..."}</pre>
-            <div ref={consoleEndRef} />
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
