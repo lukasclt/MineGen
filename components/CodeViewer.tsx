@@ -16,13 +16,15 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
-  const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
+  // Safety check: ensure project and files exist
+  const files = project?.files || [];
+  const selectedFile = files.find(f => f.path === selectedFilePath) || null;
 
   useEffect(() => {
-    if (project && project.files.length > 0) {
-      if (!selectedFilePath || !project.files.some(f => f.path === selectedFilePath)) {
-          const mainFile = project.files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || project.files[0];
-          setSelectedFilePath(mainFile.path);
+    if (project && files.length > 0) {
+      if (!selectedFilePath || !files.some(f => f.path === selectedFilePath)) {
+          const mainFile = files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || files[0];
+          setSelectedFilePath(mainFile?.path || null);
       }
     }
   }, [project]);
@@ -61,7 +63,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
       <div className="flex-1 flex overflow-hidden relative">
         <div className="w-56 bg-[#252526]/50 border-r border-gray-700 overflow-y-auto shrink-0 custom-scrollbar shadow-xl">
           <div className="py-2">
-            {project?.files.map((file, index) => {
+            {files.map((file, index) => {
                const fileName = file.path.split('/').pop();
                const isSelected = selectedFilePath === file.path;
                return (
@@ -102,7 +104,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                       </div>
                   </motion.div>
               ) : (
-                  <div className="flex items-center justify-center h-full text-gray-600 text-xs italic">Selecione um arquivo</div>
+                  <div className="flex items-center justify-center h-full text-gray-600 text-xs italic">
+                    {files.length === 0 ? "Aguardando geração de código..." : "Selecione um arquivo"}
+                  </div>
               )}
             </AnimatePresence>
         </div>

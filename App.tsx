@@ -115,8 +115,20 @@ const App: React.FC = () => {
     updateActiveProject({ settings: resolvedSettings });
   };
 
-  const handleMessagesUpdate = (newMessages: ChatMessage[]) => {
-    updateActiveProject({ messages: newMessages });
+  // FIXED: Handle functional updates for messages correctly to prevent app crash
+  const handleMessagesUpdate = (newMessagesOrUpdater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setProjects(prevProjects => prevProjects.map(p => {
+      if (p.id === currentProjectId) {
+        const currentMessages = p.messages || [];
+        // Resolve the new messages if it's a function (prev => ...) or take the value directly
+        const updatedMessages = typeof newMessagesOrUpdater === 'function' 
+          ? newMessagesOrUpdater(currentMessages)
+          : newMessagesOrUpdater;
+        
+        return { ...p, messages: updatedMessages, lastModified: Date.now() };
+      }
+      return p;
+    }));
   };
 
   const handleProjectGenerated = (generated: GeneratedProject) => {
