@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Menu } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { v4 as uuidv4 } from 'uuid'; // We'll implement a simple uuid generator helper since we don't have the lib
+import { generatePluginCode } from './services/geminiService';
 
-// Simple UUID generator helper
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
@@ -16,12 +15,16 @@ const generateUUID = () => {
 };
 
 const App: React.FC = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(sidebarOpen => window.innerWidth > 768);
   const [isLoaded, setIsLoaded] = useState(false);
   
   // Projects State
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+
+  // Eternal Mode State (Sync across components)
+  const [isEternalMode, setIsEternalMode] = useState(false);
+  const [isAutoFixing, setIsAutoFixing] = useState(false);
 
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
@@ -30,7 +33,6 @@ const App: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallButton, setShowInstallButton] = useState(false);
 
-  // Load state from localStorage on mount
   useEffect(() => {
     try {
       const savedProjectsStr = localStorage.getItem('minegen_projects');
@@ -58,21 +60,18 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Save state whenever projects change
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('minegen_projects', JSON.stringify(projects));
     }
   }, [projects, isLoaded]);
 
-  // Save current project ID
   useEffect(() => {
     if (isLoaded && currentProjectId) {
       localStorage.setItem('minegen_last_project_id', currentProjectId);
     }
   }, [currentProjectId, isLoaded]);
 
-  // Handle PWA Install Prompt
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -86,7 +85,7 @@ const App: React.FC = () => {
   const handleInstallClick = () => {
     if (deferredPrompt) {
       deferredPrompt.prompt();
-      deferredPrompt.userChoice.then((choiceResult: any) => {
+      deferredPrompt.userChoice.then(() => {
         setDeferredPrompt(null);
         setShowInstallButton(false);
       });
@@ -108,40 +107,32 @@ const App: React.FC = () => {
 
     setProjects(prev => [newProject, ...prev]);
     setCurrentProjectId(newProject.id);
-    if (window.innerWidth < 768) setSidebarOpen(false); // Close sidebar on mobile
+    setIsEternalMode(false);
+    if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
   const deleteProject = (id: string) => {
     if (!window.confirm("Tem certeza que deseja excluir este projeto?")) return;
-    
     const newProjects = projects.filter(p => p.id !== id);
     setProjects(newProjects);
-    
     if (currentProjectId === id) {
-      if (newProjects.length > 0) {
-        setCurrentProjectId(newProjects[0].id);
-      } else {
-        createNewProject();
-      }
+      if (newProjects.length > 0) setCurrentProjectId(newProjects[0].id);
+      else createNewProject();
     }
   };
 
-  const updateActiveProject = (updates: Partial<SavedProject>) => {
+  const updateActiveProject = useCallback((updates: Partial<SavedProject>) => {
     setProjects(prev => prev.map(p => {
       if (p.id === currentProjectId) {
         return { ...p, ...updates, lastModified: Date.now() };
       }
       return p;
     }));
-  };
+  }, [currentProjectId]);
 
   const handleSettingsChange = (newSettings: React.SetStateAction<PluginSettings>) => {
     if (!activeProject) return;
-    
-    const resolvedSettings = typeof newSettings === 'function' 
-      ? newSettings(activeProject.settings) 
-      : newSettings;
-
+    const resolvedSettings = typeof newSettings === 'function' ? newSettings(activeProject.settings) : newSettings;
     updateActiveProject({ settings: resolvedSettings });
   };
 
@@ -153,48 +144,75 @@ const App: React.FC = () => {
     updateActiveProject({ generatedProject: generated });
   };
 
+  // --- ETERNAL MODE AUTO-FIX VIA CHAT ---
+  const handleBuildFailure = async (logs: string) => {
+    if (!isEternalMode || !activeProject || isAutoFixing) return;
+
+    setIsAutoFixing(true);
+    const errorPrompt = `O build falhou com os seguintes erros:\n\n${logs.slice(-3000)}\n\nPor favor, analise os logs e corrija o código para que o build passe no Java ${activeProject.settings.javaVersion}.`;
+    
+    // Add user message to chat
+    const userMsg: ChatMessage = { role: 'user', text: errorPrompt };
+    const updatedMessages = [...activeProject.messages, userMsg];
+    updateActiveProject({ messages: updatedMessages });
+
+    try {
+      // Call AI for fix
+      const fixedProject = await generatePluginCode(errorPrompt, activeProject.settings, activeProject.generatedProject);
+      
+      const aiMsg: ChatMessage = {
+        role: 'model',
+        text: "Encontrei erros no build e apliquei as correções necessárias. Reiniciando build automático...",
+        projectData: fixedProject
+      };
+      
+      updateActiveProject({ 
+        messages: [...updatedMessages, aiMsg],
+        generatedProject: fixedProject 
+      });
+    } catch (error: any) {
+      const errMsg: ChatMessage = {
+        role: 'model',
+        text: `Falha ao tentar corrigir automaticamente: ${error.message}`,
+        isError: true
+      };
+      updateActiveProject({ messages: [...updatedMessages, errMsg] });
+      setIsEternalMode(false); // Stop loop on API error
+    } finally {
+      setIsAutoFixing(false);
+    }
+  };
+
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
   if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
 
   return (
     <div className="flex h-screen w-full bg-mc-dark text-white overflow-hidden font-sans relative">
-      
-      {/* Background */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <div className="absolute inset-0 bg-grid-animate opacity-30"></div>
         <div className="absolute inset-0 bg-radial-gradient"></div>
       </div>
 
-      {/* Mobile Overlay */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* Sidebar */}
       <Sidebar 
         isOpen={sidebarOpen}
         toggleSidebar={toggleSidebar}
-        
-        // Project Management Props
         projects={projects}
         currentProjectId={currentProjectId}
-        onSelectProject={setCurrentProjectId}
+        onSelectProject={(id) => { setCurrentProjectId(id); setIsEternalMode(false); }}
         onCreateProject={createNewProject}
         onDeleteProject={deleteProject}
-        
-        // Config Props (Active Project)
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
         setSettings={handleSettingsChange}
-        
         showInstallButton={showInstallButton}
         onInstall={handleInstallClick}
       />
 
-      {/* Main Content */}
       <div className="flex-1 flex flex-col md:flex-row h-full relative z-10">
-        
-        {/* Mobile Header */}
         <div className="md:hidden h-14 border-b border-gray-700 flex items-center px-4 bg-mc-panel z-10 flex-shrink-0 justify-between">
           <div className="flex items-center">
             <button onClick={toggleSidebar} className="text-gray-300 mr-3">
@@ -204,28 +222,30 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Chat Area */}
         <div className="flex-1 md:w-[40%] md:flex-none border-r border-gray-800 h-full overflow-hidden bg-mc-dark/50 backdrop-blur-sm">
           {activeProject && (
             <ChatInterface 
-              key={activeProject.id} // Force re-mount on project switch
+              key={activeProject.id}
               settings={activeProject.settings} 
               messages={activeProject.messages}
               setMessages={handleMessagesUpdate}
               currentProject={activeProject.generatedProject}
               onProjectGenerated={handleProjectGenerated}
-              onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })} // Soft reset
+              onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
               onUpdateProjectName={(name) => updateActiveProject({ name })}
+              isExternalLoading={isAutoFixing}
             />
           )}
         </div>
 
-        {/* Code View Area */}
         <div className="hidden md:flex flex-1 md:w-[60%] h-full overflow-hidden shadow-2xl">
           <CodeViewer 
             project={activeProject?.generatedProject || null} 
             settings={activeProject?.settings || DEFAULT_SETTINGS}
             onProjectUpdate={handleProjectGenerated}
+            isEternalMode={isEternalMode}
+            setIsEternalMode={setIsEternalMode}
+            onBuildFailure={handleBuildFailure}
           />
         </div>
       </div>
