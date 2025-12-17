@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Loader2, Sparkles, AlertCircle, Trash2, Cpu } from 'lucide-react';
+import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2 } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 
 interface ChatInterfaceProps {
@@ -11,7 +11,6 @@ interface ChatInterfaceProps {
   onProjectGenerated: (project: any) => void;
   onClearProject: () => void;
   onUpdateProjectName: (name: string) => void;
-  isExternalLoading?: boolean;
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -21,8 +20,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   currentProject, 
   onProjectGenerated, 
   onClearProject,
-  onUpdateProjectName,
-  isExternalLoading = false
+  onUpdateProjectName
 }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -37,7 +35,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading, isExternalLoading, progress]);
+  }, [messages, isLoading, progress]);
 
   // Handle first user message to name the project automatically
   useEffect(() => {
@@ -50,7 +48,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading || isExternalLoading) return;
+    if (!input.trim() || isLoading) return;
 
     const userMessage: ChatMessage = { role: 'user', text: input };
     setMessages([...messages, userMessage]);
@@ -105,8 +103,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const effectiveLoading = isLoading || isExternalLoading;
-
   return (
     <div className="flex flex-col h-full relative z-10">
        <div className="absolute top-2 right-4 z-10 flex gap-2">
@@ -134,17 +130,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             )}
           </div>
         ))}
-        {effectiveLoading && (
+        {isLoading && (
           <div className="flex flex-col gap-2 max-w-[85%]">
             <div className="flex gap-4 items-end">
                <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center border border-gray-700 shadow-lg"><Cpu className="w-5 h-5 text-mc-accent animate-pulse" /></div>
                <div className="bg-mc-panel/90 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 flex flex-col gap-2 min-w-[250px]">
                   <div className="flex justify-between items-center text-xs text-gray-400 font-mono">
-                    <span>{isLoading ? loadingText : 'IA Corrigindo Build...'}</span>
-                    <span className="text-mc-accent">{isLoading ? Math.round(progress) + '%' : ''}</span>
+                    <span>{loadingText}</span>
+                    <span className="text-mc-accent">{Math.round(progress) + '%'}</span>
                   </div>
                   <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                    <div className={`h-full bg-mc-accent transition-all duration-300 ${isExternalLoading ? 'animate-pulse w-full' : ''}`} style={isLoading ? { width: `${progress}%` } : {}} />
+                    <div className="h-full bg-mc-accent transition-all duration-300" style={{ width: `${progress}%` }} />
                   </div>
               </div>
             </div>
@@ -155,8 +151,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       <div className="absolute bottom-0 left-0 right-0 p-4 pt-10 bg-gradient-to-t from-mc-dark via-mc-dark to-transparent">
         <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto">
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={currentProject ? "Ex: Adicione um comando /spawn..." : "Crie um plugin..."} className="w-full bg-[#2B2D31]/90 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent text-sm" disabled={effectiveLoading} />
-          <button type="submit" disabled={!input.trim() || effectiveLoading} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-colors disabled:opacity-50"><Send className="w-5 h-5" /></button>
+          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={currentProject ? "Ex: Adicione um comando /spawn..." : "Crie um plugin..."} className="w-full bg-[#2B2D31]/90 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent text-sm" disabled={isLoading} />
+          <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-colors disabled:opacity-50">Send</button>
         </form>
       </div>
     </div>

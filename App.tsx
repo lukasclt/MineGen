@@ -22,10 +22,6 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
-  // Eternal Mode State (Sync across components)
-  const [isEternalMode, setIsEternalMode] = useState(false);
-  const [isAutoFixing, setIsAutoFixing] = useState(false);
-
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
 
@@ -107,7 +103,6 @@ const App: React.FC = () => {
 
     setProjects(prev => [newProject, ...prev]);
     setCurrentProjectId(newProject.id);
-    setIsEternalMode(false);
     if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
@@ -144,45 +139,6 @@ const App: React.FC = () => {
     updateActiveProject({ generatedProject: generated });
   };
 
-  // --- ETERNAL MODE AUTO-FIX VIA CHAT ---
-  const handleBuildFailure = async (logs: string) => {
-    if (!isEternalMode || !activeProject || isAutoFixing) return;
-
-    setIsAutoFixing(true);
-    const errorPrompt = `O build falhou com os seguintes erros:\n\n${logs.slice(-3000)}\n\nPor favor, analise os logs e corrija o código para que o build passe no Java ${activeProject.settings.javaVersion}.`;
-    
-    // Add user message to chat
-    const userMsg: ChatMessage = { role: 'user', text: errorPrompt };
-    const updatedMessages = [...activeProject.messages, userMsg];
-    updateActiveProject({ messages: updatedMessages });
-
-    try {
-      // Call AI for fix
-      const fixedProject = await generatePluginCode(errorPrompt, activeProject.settings, activeProject.generatedProject);
-      
-      const aiMsg: ChatMessage = {
-        role: 'model',
-        text: "Encontrei erros no build e apliquei as correções necessárias. Reiniciando build automático...",
-        projectData: fixedProject
-      };
-      
-      updateActiveProject({ 
-        messages: [...updatedMessages, aiMsg],
-        generatedProject: fixedProject 
-      });
-    } catch (error: any) {
-      const errMsg: ChatMessage = {
-        role: 'model',
-        text: `Falha ao tentar corrigir automaticamente: ${error.message}`,
-        isError: true
-      };
-      updateActiveProject({ messages: [...updatedMessages, errMsg] });
-      setIsEternalMode(false); // Stop loop on API error
-    } finally {
-      setIsAutoFixing(false);
-    }
-  };
-
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
   if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
@@ -203,7 +159,7 @@ const App: React.FC = () => {
         toggleSidebar={toggleSidebar}
         projects={projects}
         currentProjectId={currentProjectId}
-        onSelectProject={(id) => { setCurrentProjectId(id); setIsEternalMode(false); }}
+        onSelectProject={(id) => { setCurrentProjectId(id); }}
         onCreateProject={createNewProject}
         onDeleteProject={deleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
@@ -233,7 +189,6 @@ const App: React.FC = () => {
               onProjectGenerated={handleProjectGenerated}
               onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
               onUpdateProjectName={(name) => updateActiveProject({ name })}
-              isExternalLoading={isAutoFixing}
             />
           )}
         </div>
@@ -243,9 +198,6 @@ const App: React.FC = () => {
             project={activeProject?.generatedProject || null} 
             settings={activeProject?.settings || DEFAULT_SETTINGS}
             onProjectUpdate={handleProjectGenerated}
-            isEternalMode={isEternalMode}
-            setIsEternalMode={setIsEternalMode}
-            onBuildFailure={handleBuildFailure}
           />
         </div>
       </div>

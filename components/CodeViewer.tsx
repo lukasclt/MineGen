@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github, UploadCloud, PlayCircle, Loader2, ArrowUpCircle, Sparkles, Wand2, StopCircle, RotateCcw } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, RefreshCw, PlayCircle, Loader2, UploadCloud, ChevronDown } from 'lucide-react';
 import JSZip from 'jszip';
 import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact } from '../services/githubService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
@@ -9,15 +9,9 @@ interface CodeViewerProps {
   project: GeneratedProject | null;
   settings: PluginSettings;
   onProjectUpdate?: (newProject: GeneratedProject) => void;
-  isEternalMode: boolean;
-  setIsEternalMode: (val: boolean) => void;
-  onBuildFailure: (logs: string) => void;
 }
 
-const CodeViewer: React.FC<CodeViewerProps> = ({ 
-  project, settings, onProjectUpdate, 
-  isEternalMode, setIsEternalMode, onBuildFailure 
-}) => {
+const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpdate }) => {
   const [selectedFile, setSelectedFile] = useState<GeneratedFile | null>(null);
   const [copied, setCopied] = useState(false);
   
@@ -29,10 +23,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   const [buildProgress, setBuildProgress] = useState(0);
   
-  // Internal tracking to avoid loops
-  const lastBuiltProjectRef = useRef<string | null>(null);
   const buildInProgressRef = useRef(false);
-
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,14 +36,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
       } else if (fileExists.content !== selectedFile?.content) {
           setSelectedFile(fileExists);
       }
-
-      // AUTO BUILD IN ETERNAL MODE
-      const projectHash = JSON.stringify(project.files);
-      if (isEternalMode && projectHash !== lastBuiltProjectRef.current && !buildInProgressRef.current) {
-         handleCommitAndPush(true);
-      }
     }
-  }, [project, isEternalMode]);
+  }, [project]);
 
   useEffect(() => {
     if (showConsole) {
@@ -77,8 +62,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
     }
     
     buildInProgressRef.current = true;
-    const projectHash = JSON.stringify(project.files);
-    lastBuiltProjectRef.current = projectHash;
 
     const workflowPath = ".github/workflows/build.yml";
     const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
@@ -103,7 +86,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
     } catch (e: any) {
         setBuildLogs(prev => prev + `> 🛑 ERRO no Push: ${e.message}\n`);
         setBuildStatus('idle');
-        setIsEternalMode(false);
         buildInProgressRef.current = false;
     } finally {
         setIsCommitting(false);
@@ -134,16 +116,11 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
                          setBuildLogs(prev => prev + `> ✅ SUCESSO! JAR gerado e pronto.\n`);
-                         setIsEternalMode(false);
                          const url = await getBuildArtifact(settings.github!, run.id);
                          if (url) setArtifactUrl(url);
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ Falha detectada no Maven.\n`);
-                         if (isEternalMode) {
-                            setBuildLogs(prev => prev + `> 🔄 MODO ETERNO: Solicitando correção via Chat...\n`);
-                            onBuildFailure(buildLogs + "\n" + (run.conclusion_message || "Maven compilation failed. Check pom.xml and syntax."));
-                         }
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -155,7 +132,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
           if (attempts > 180) {
               clearInterval(pollInterval);
               setBuildLogs(prev => prev + `> 🛑 Timeout no build.\n`);
-              setIsEternalMode(false);
               buildInProgressRef.current = false;
           }
       }, 3000);
@@ -262,17 +238,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({
               <Terminal className="w-3 h-3 text-gray-400" />
               <span className="text-gray-300">Terminal: Maven Logs</span>
               {(buildStatus === 'in_progress' || buildStatus === 'queued') && <span className="text-yellow-400 font-bold ml-2">Progress: {buildProgress}%</span>}
-              {isEternalMode && (
-                  <div className="flex items-center gap-2 bg-purple-500/10 border border-purple-500/30 px-2 py-0.5 rounded animate-pulse">
-                      <Sparkles className="w-3 h-3 text-purple-400" />
-                      <span className="text-purple-300 text-[10px] font-bold uppercase tracking-wider">Eternal Mode Active</span>
-                  </div>
-              )}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => setIsEternalMode(!isEternalMode)} className={`flex items-center gap-1.5 px-3 py-1 rounded text-[10px] font-bold uppercase transition-all border ${isEternalMode ? 'bg-red-500/20 border-red-500/50 text-red-300' : 'bg-purple-500/20 border-purple-500/50 text-purple-300 hover:bg-purple-500/40'}`}>
-                 {isEternalMode ? <><StopCircle className="w-3 h-3" /> Parar Loop</> : <><RotateCcw className="w-3 h-3" /> Auto-Fix Loop</>}
-              </button>
               <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
             </div>
           </div>
