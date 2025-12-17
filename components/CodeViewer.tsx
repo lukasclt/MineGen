@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
 import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github, UploadCloud, PlayCircle, Loader2, ArrowUpCircle, Sparkles, Wand2 } from 'lucide-react';
 import JSZip from 'jszip';
-import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
+import { fixPluginCode } from '../services/geminiService';
 import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact } from '../services/githubService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
 
@@ -68,7 +68,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         return;
     }
     
-    // PREPARE FILES: Force update Workflow to ensure valid build command
+    // PREPARE FILES: Force update Workflow to ensure valid build command (MAVEN)
     const workflowPath = ".github/workflows/build.yml";
     const workflowContent = GITHUB_ACTION_TEMPLATE(settings.javaVersion);
     
@@ -88,13 +88,13 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
 
     setIsCommitting(true);
-    setBuildLogs(prev => prev + `\n> Iniciando Commit e Push para ${settings.github!.repoName}...\n`);
+    setBuildLogs(prev => prev + `\n> Iniciando Commit e Push para ${settings.github!.repoName} (Maven)...\n`);
     setShowConsole(true);
     setBuildStatus('queued'); // Optimistic UI
 
     try {
-        await commitAndPushFiles(settings.github!, filesToPush, `Update plugin: ${new Date().toISOString()}`);
-        setBuildLogs(prev => prev + `> Arquivos enviados com sucesso!\n> O GitHub Actions deve iniciar em breve.\n`);
+        await commitAndPushFiles(settings.github!, filesToPush, `Update plugin (Maven): ${new Date().toISOString()}`);
+        setBuildLogs(prev => prev + `> Arquivos enviados com sucesso!\n> O GitHub Actions (Maven) deve iniciar em breve.\n`);
         
         // Start polling for build
         pollBuildStatus();
@@ -110,7 +110,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const pollBuildStatus = async () => {
       if (!settings.github) return;
       
-      setBuildLogs(prev => prev + `> Aguardando início do Workflow (GitHub Actions)...\n`);
+      setBuildLogs(prev => prev + `> Aguardando início do Workflow (Maven build)...\n`);
       
       let attempts = 0;
       const pollInterval = setInterval(async () => {
@@ -125,7 +125,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
-                         setBuildLogs(prev => prev + `> Buscando artefato (JAR)...\n`);
+                         setBuildLogs(prev => prev + `> Buscando artefato (JAR do target/)...\n`);
                          const url = await getBuildArtifact(settings.github!, run.id);
                          if (url) {
                             setArtifactUrl(url);
@@ -135,7 +135,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                          }
                      } else {
                          setBuildStatus('failure');
-                         setBuildLogs(prev => prev + `> Build falhou. Tente usar a Correção Automática.\n`);
+                         setBuildLogs(prev => prev + `> Build Maven falhou. Tente usar a Correção Automática.\n`);
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -161,7 +161,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       if (!project || !buildLogs) return;
       
       setIsFixing(true);
-      setBuildLogs(prev => prev + `\n> 🧠 IA: Analisando logs de erro e corrigindo código...\n`);
+      setBuildLogs(prev => prev + `\n> 🧠 IA: Analisando logs de erro do Maven e corrigindo projeto...\n`);
       
       try {
           // Extrair as últimas linhas de log relevantes (para não estourar tokens)
@@ -173,7 +173,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
               onProjectUpdate(fixedProject);
           }
           
-          setBuildLogs(prev => prev + `> 🧠 IA: Correções aplicadas! Clique em "Commit & Push" para testar novamente.\n`);
+          setBuildLogs(prev => prev + `> 🧠 IA: Correções aplicadas! Clique em "Commit & Push" para testar novamente no Maven.\n`);
           setBuildStatus('idle'); // Reset status so user can push again
       } catch (e: any) {
           setBuildLogs(prev => prev + `> 🧠 IA Erro: ${e.message}\n`);
@@ -196,12 +196,11 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     if (!project) return;
     const zip = new JSZip();
     project.files.forEach(file => zip.file(file.path, file.content));
-    zip.file("gradlew", `#!/bin/sh\necho "Please use 'gradle build' command directly as wrapper is not included."\n`);
     const blob = await zip.generateAsync({type:"blob"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${settings.name}-source.zip`;
+    a.download = `${settings.name}-maven-source.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -213,7 +212,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       <div className="flex-1 flex flex-col items-center justify-center bg-transparent text-gray-500 h-full p-8 text-center border-l border-gray-800">
         <FileCode className="w-16 h-16 mb-4 opacity-20" />
         <p className="text-lg font-medium">Nenhum Código Gerado Ainda</p>
-        <p className="text-sm max-w-md mt-2">Comece a conversar para gerar a estrutura do projeto Gradle.</p>
+        <p className="text-sm max-w-md mt-2">Comece a conversar para gerar a estrutura do projeto Maven.</p>
       </div>
     );
   }
@@ -265,7 +264,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                          >
                             {buildStatus === 'in_progress' || buildStatus === 'queued' ? <RefreshCw className="w-3 h-3 animate-spin"/> : <PlayCircle className="w-3 h-3" />}
                             <span className="hidden xl:inline">
-                                {buildStatus === 'idle' ? 'Build (Cloud)' : 
+                                {buildStatus === 'idle' ? 'Build (Maven Cloud)' : 
                                  buildStatus === 'queued' ? 'Na Fila...' : 
                                  buildStatus === 'in_progress' ? 'Compilando...' : 'Falha'}
                             </span>
@@ -302,7 +301,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                const isSelected = selectedFile?.path === file.path;
                let iconColor = 'text-gray-400';
                if (fileName?.endsWith('.java')) iconColor = 'text-orange-400';
-               else if (fileName?.endsWith('.gradle')) iconColor = 'text-blue-400';
+               else if (fileName?.endsWith('.xml')) iconColor = 'text-blue-400';
                else if (fileName?.endsWith('.yml') || fileName?.endsWith('.json') || fileName?.endsWith('.yaml')) iconColor = 'text-yellow-400';
 
                return (
@@ -349,17 +348,17 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         </div>
       </div>
 
-      {/* Build Console / Terminal - OVERLAY (Segundo Plano Visual) */}
+      {/* Build Console / Terminal - OVERLAY */}
       {showConsole && (
         <div className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl transition-all duration-300 ease-in-out h-64`}>
           <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
             <div className="flex items-center gap-2 text-xs font-mono">
               <Terminal className="w-3 h-3 text-gray-400" />
-              <span className="text-gray-300">Terminal: GitHub Actions Log</span>
+              <span className="text-gray-300">Terminal: Maven Logs</span>
               
-              {buildStatus === 'in_progress' && <span className="text-yellow-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Compilando na Nuvem...</span>}
-              {buildStatus === 'success' && <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Sucesso</span>}
-              {buildStatus === 'failure' && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3"/> Falha</span>}
+              {buildStatus === 'in_progress' && <span className="text-yellow-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Compilando com Maven...</span>}
+              {buildStatus === 'success' && <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Sucesso (JAR no target/)</span>}
+              {buildStatus === 'failure' && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3"/> Falha no Maven</span>}
               
               {isFixing && <span className="text-purple-400 flex items-center gap-1"><Wand2 className="w-3 h-3 animate-pulse"/> Corrigindo com IA...</span>}
             </div>
@@ -383,7 +382,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           <div className="flex-1 overflow-y-auto p-3 font-mono text-xs text-gray-300 custom-scrollbar">
             {!settings.github?.isConnected ? (
                 <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-2">
-                    <p>Você precisa conectar sua conta do GitHub para ver os logs de build.</p>
+                    <p>Conecte o GitHub para ver os logs do Maven.</p>
                 </div>
             ) : (
                 <>

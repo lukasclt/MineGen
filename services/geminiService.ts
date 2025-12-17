@@ -54,13 +54,13 @@ export const generatePluginCode = async (
       INSTRUÇÕES IMPORTANTES:
       1. Analise os arquivos atuais.
       2. Aplique as mudanças solicitadas (adicionar arquivos, modificar lógica ou atualizar configs).
-      3. **VERSÃO AUTOMÁTICA**: Você DEVE incrementar a versão do plugin (ex: 1.0 -> 1.1 ou 1.0-SNAPSHOT -> 1.1-SNAPSHOT) no arquivo 'build.gradle' E no arquivo de configuração do plugin ('plugin.yml' ou 'velocity-plugin.json').
+      3. **VERSÃO AUTOMÁTICA**: Você DEVE incrementar a versão do plugin (ex: 1.0 -> 1.1 ou 1.0-SNAPSHOT -> 1.1-SNAPSHOT) no arquivo 'pom.xml' E no arquivo de configuração do plugin ('plugin.yml' ou 'velocity-plugin.json').
       4. Retorne a estrutura COMPLETA do projeto (incluindo arquivos não alterados, para que o projeto completo seja retornado).
     `;
   } else {
     // NEW PROJECT MODE
     userPromptContext = `
-      Configurações do Projeto:
+      Configurações do Projeto (MAVEN):
       - Nome: ${settings.name}
       - Plataforma: ${settings.platform}
       - Versão do Minecraft: ${settings.mcVersion}
@@ -107,7 +107,7 @@ export interface BuildResult {
   logs: string;
 }
 
-export const simulateGradleBuild = async (
+export const simulateMavenBuild = async (
   project: GeneratedProject,
   settings: PluginSettings
 ): Promise<BuildResult> => {
@@ -116,13 +116,13 @@ export const simulateGradleBuild = async (
   const fileContext = project.files.map(f => `--- ${f.path} ---\n${f.content}`).join("\n\n");
   
   const prompt = `
-    Atue como um Compilador Java e Ferramenta de Build Gradle rigorosos.
-    Analise o código fonte do Plugin de Minecraft a seguir em busca de erros de sintaxe, imports faltando, erros de lógica ou configuração inválida.
+    Atue como um Compilador Java e Ferramenta de Build Maven rigorosos.
+    Analise o código fonte do Plugin de Minecraft a seguir em busca de erros de sintaxe, imports faltando, erros de lógica ou configuração inválida no pom.xml.
     
-    Simule a execução de './gradlew clean build'.
+    Simule a execução de 'mvn clean package'.
     
     Se NÃO houver erros, retorne success: true.
-    Se HOUVER erros, retorne success: false e forneça um output detalhado estilo "build log" explicando os erros.
+    Se HOUVER erros, retorne success: false e forneça um output detalhado estilo "maven build log" explicando os erros.
     
     Response JSON Schema:
     {
@@ -135,7 +135,7 @@ export const simulateGradleBuild = async (
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
-        { role: "system", content: "Você é um Simulador de Compilador Java/Gradle. Output JSON." },
+        { role: "system", content: "Você é um Simulador de Compilador Java/Maven. Output JSON." },
         { role: "user", content: prompt + "\n\nCÓDIGO PARA VERIFICAR:\n" + fileContext }
       ],
       response_format: { type: "json_object" }
@@ -160,10 +160,10 @@ export const fixPluginCode = async (
   const fileContext = project.files.map(f => `--- ${f.path} ---\n${f.content}`).join("\n\n");
 
   const prompt = `
-    O build anterior do Gradle FALHOU com os seguintes erros:
+    O build anterior do Maven FALHOU com os seguintes erros:
     ${buildLogs}
     
-    Por favor, CORRIJA o código para resolver esses erros de compilação.
+    Por favor, CORRIJA o código ou o pom.xml para resolver esses erros de compilação.
     Retorne a estrutura COMPLETA do projeto atualizada (incluindo todos os arquivos, até os não alterados).
     
     Responda com JSON estrito combinando com o schema GeneratedProject.
@@ -173,7 +173,7 @@ export const fixPluginCode = async (
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION + "\nCorrija o código baseado nos logs de erro." },
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nCorrija o código baseado nos logs de erro do Maven." },
         { role: "user", content: "CÓDIGO ATUAL:\n" + fileContext + "\n\n" + prompt }
       ],
       response_format: { type: "json_object" }

@@ -26,21 +26,12 @@ Você é um Engenheiro de Software Sênior especializado em ecossistemas de Serv
 Sua responsabilidade é arquitetar e escrever código Java de alta qualidade, pronto para produção.
 
 # RESTRIÇÕES (CONSTRAINTS)
-1. **Sistema de Build (Gradle Moderno)**:
-   - OBRIGATÓRIO usar **Gradle** (Groovy DSL).
-   - OBRIGATÓRIO gerar 'build.gradle', 'settings.gradle' e 'gradle.properties'.
-   - OBRIGATÓRIO usar o plugin 'com.github.johnrengelman.shadow' para gerenciar dependências.
-   - **IMPORTANTE: Versão do Java**:
-     - Utilize a feature **Java Toolchains** do Gradle para definir a versão do Java.
-     - No 'build.gradle', configure:
-       \`\`\`groovy
-       java {
-           toolchain {
-               languageVersion = JavaLanguageVersion.of(NUMERO_DA_VERSAO) // ex: 8, 11, 17, 21
-           }
-       }
-       \`\`\`
-     - Isso garante que o Gradle consiga compilar para a versão correta de forma isolada.
+1. **Sistema de Build (Maven)**:
+   - OBRIGATÓRIO usar **Maven**.
+   - OBRIGATÓRIO gerar um arquivo 'pom.xml' completo e válido.
+   - OBRIGATÓRIO configurar o 'maven-compiler-plugin' com 'source' e 'target' (ou 'release') para a versão Java solicitada.
+   - OBRIGATÓRIO usar o 'maven-shade-plugin' para gerenciar dependências e criar o fat-jar (shaded jar).
+   - NUNCA gere arquivos de build do Gradle (.gradle).
 
 2. **Padrões de Plataforma**:
    - Para **Paper/Spigot**:
@@ -54,8 +45,9 @@ Sua responsabilidade é arquitetar e escrever código Java de alta qualidade, pr
 
 3. **Código Java**:
    - Siga as convenções de código Java (camelCase, PascalCase).
-   - Se a versão for Java 8, NÃO use 'var', 'records' ou 'switch expressions'.
-   - Se a versão for Java 17+, abuse das funcionalidades modernas.
+   - Respeite estritamente a versão do Java solicitada:
+     - Java 8 (1.8): Sem 'var', sem records, sem switch moderno.
+     - Java 11/17/21: Use as funcionalidades disponíveis nessas versões.
    - Trate exceções e nulls adequadamente.
 
 4. **Formato de Resposta**:
@@ -70,13 +62,13 @@ Responda com o seguinte esquema JSON:
     {
       "path": "caminho/do/arquivo (ex: src/main/java/com/exemplo/Main.java)",
       "content": "conteúdo completo do arquivo",
-      "language": "linguagem (java, json, yaml, groovy)"
+      "language": "linguagem (java, xml, json, yaml)"
     }
   ]
 }
 `;
 
-export const GITHUB_ACTION_TEMPLATE = (targetJavaVersion: string) => `name: Build Plugin
+export const GITHUB_ACTION_TEMPLATE = (targetJavaVersion: string) => `name: Build Plugin (Maven)
 
 on:
   push:
@@ -91,31 +83,20 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    # Instalamos primeiro o JDK alvo do plugin (ex: 8, 11, 17)
-    - name: Set up Target JDK (${targetJavaVersion})
+    # Instalamos estritamente o JDK selecionado pelo criador do plugin
+    - name: Set up JDK ${targetJavaVersion}
       uses: actions/setup-java@v4
       with:
         java-version: '${targetJavaVersion}'
         distribution: 'temurin'
-        
-    # Instalamos por último o JDK 21 para garantir que ele seja o padrão do ambiente (JAVA_HOME)
-    # permitindo que o Gradle 8.5+ rode sem erros de "JVM 17 or later required".
-    - name: Set up Runner JDK (21)
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
+        cache: 'maven'
     
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-      
-    - name: Build with Gradle
-      # O Gradle usará o Java 21 para rodar e o Toolchain (definido no build.gradle) para compilar.
-      run: gradle build --no-daemon
+    - name: Build with Maven
+      run: mvn clean package -B
       
     - name: Upload Build Artifact (JAR)
       uses: actions/upload-artifact@v4
       with:
         name: plugin-jar
-        path: build/libs/*.jar
+        path: target/*.jar
 `;
