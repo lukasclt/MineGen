@@ -90,9 +90,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
-    // Se for fix, mostramos os logs no chat para o usuário ver o que deu erro
+    // A mensagem visual no chat deve ser limpa conforme a imagem do usuário
     const displayMessageText = isFix 
-      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`\n${text}\n\`\`\``
+      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...`
       : text;
 
     const userMessage: ChatMessage = { 
@@ -117,6 +117,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       let project;
       if (isFix && currentProject) {
+          // Passamos o 'text' (que contém os logs originais) para a IA,
+          // mas a mensagem exibida no chat continua sendo a 'displayMessageText'.
           project = await fixPluginCode(currentProject, text, settings);
       } else {
           project = await generatePluginCode(text, settings, currentProject);
