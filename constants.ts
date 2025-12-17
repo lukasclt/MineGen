@@ -68,7 +68,11 @@ Responda com o seguinte esquema JSON:
 }
 `;
 
-export const GITHUB_ACTION_TEMPLATE = (targetJavaVersion: string) => `name: Build Plugin (Maven)
+export const GITHUB_ACTION_TEMPLATE = (targetJavaVersion: string) => {
+  // A action setup-java espera '8' em vez de '1.8'
+  const version = targetJavaVersion === '1.8' ? '8' : targetJavaVersion;
+  
+  return `name: Build Plugin (Maven)
 
 on:
   push:
@@ -83,11 +87,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    # Instalamos estritamente o JDK selecionado pelo criador do plugin
-    - name: Set up JDK ${targetJavaVersion}
+    # Instalamos apenas o JDK selecionado pelo criador
+    - name: Set up JDK ${version}
       uses: actions/setup-java@v4
       with:
-        java-version: '${targetJavaVersion}'
+        java-version: '${version}'
         distribution: 'temurin'
         cache: 'maven'
     
@@ -100,3 +104,4 @@ jobs:
         name: plugin-jar
         path: target/*.jar
 `;
+};

@@ -88,19 +88,17 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     }
 
     setIsCommitting(true);
-    setBuildLogs(prev => prev + `\n> Iniciando Commit e Push para ${settings.github!.repoName} (Maven)...\n`);
+    setBuildLogs(prev => prev + `\n> Enviando alterações para o GitHub (Java ${settings.javaVersion})...\n`);
     setShowConsole(true);
-    setBuildStatus('queued'); // Optimistic UI
+    setBuildStatus('queued');
 
     try {
-        await commitAndPushFiles(settings.github!, filesToPush, `Update plugin (Maven): ${new Date().toISOString()}`);
-        setBuildLogs(prev => prev + `> Arquivos enviados com sucesso!\n> O GitHub Actions (Maven) deve iniciar em breve.\n`);
-        
-        // Start polling for build
+        await commitAndPushFiles(settings.github!, filesToPush, `Build with Java ${settings.javaVersion} (Maven)`);
+        setBuildLogs(prev => prev + `> Arquivos enviados! O GitHub iniciará o build em Java ${settings.javaVersion} em instantes.\n`);
         pollBuildStatus();
     } catch (e: any) {
         setBuildLogs(prev => prev + `> ERRO ao enviar: ${e.message}\n`);
-        setBuildStatus('idle'); // Reset on send error
+        setBuildStatus('idle');
     } finally {
         setIsCommitting(false);
     }
@@ -110,7 +108,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const pollBuildStatus = async () => {
       if (!settings.github) return;
       
-      setBuildLogs(prev => prev + `> Aguardando início do Workflow (Maven build)...\n`);
+      setBuildLogs(prev => prev + `> Monitorando progresso do build...\n`);
       
       let attempts = 0;
       const pollInterval = setInterval(async () => {
@@ -121,26 +119,26 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
              if (run) {
                  if (run.status === 'completed') {
                      clearInterval(pollInterval);
-                     setBuildLogs(prev => prev + `> Workflow Finalizado: ${run.conclusion}\n`);
+                     setBuildLogs(prev => prev + `> Build concluído: ${run.conclusion.toUpperCase()}\n`);
                      
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
-                         setBuildLogs(prev => prev + `> Buscando artefato (JAR do target/)...\n`);
+                         setBuildLogs(prev => prev + `> Coletando JAR da pasta target/...\n`);
                          const url = await getBuildArtifact(settings.github!, run.id);
                          if (url) {
                             setArtifactUrl(url);
-                            setBuildLogs(prev => prev + `> JAR Disponível para Download!\n`);
+                            setBuildLogs(prev => prev + `> Sucesso! O arquivo JAR está pronto para download.\n`);
                          } else {
-                            setBuildLogs(prev => prev + `> Erro: Artefato não encontrado, mas build passou.\n`);
+                            setBuildLogs(prev => prev + `> Build passou, mas o artefato não foi gerado.\n`);
                          }
                      } else {
                          setBuildStatus('failure');
-                         setBuildLogs(prev => prev + `> Build Maven falhou. Tente usar a Correção Automática.\n`);
+                         setBuildLogs(prev => prev + `> Ocorreu um erro na compilação. Use o botão "Corrigir Erros" acima.\n`);
                      }
                  } else {
                      setBuildStatus('in_progress');
-                     if (attempts % 5 === 0) { // Log every ~10s
-                         setBuildLogs(prev => prev + `> Status atual: ${run.status}...\n`);
+                     if (attempts % 5 === 0) {
+                         setBuildLogs(prev => prev + `> Build em andamento (${run.status})...\n`);
                      }
                  }
              }
@@ -148,9 +146,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
               console.error(e);
           }
 
-          if (attempts > 120) { // 4 minutes max polling
+          if (attempts > 120) {
               clearInterval(pollInterval);
-              setBuildLogs(prev => prev + `> Timeout aguardando build.\n`);
+              setBuildLogs(prev => prev + `> Timeout: O build está demorando demais.\n`);
               setBuildStatus('idle');
           }
       }, 2000);
@@ -161,20 +159,18 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       if (!project || !buildLogs) return;
       
       setIsFixing(true);
-      setBuildLogs(prev => prev + `\n> 🧠 IA: Analisando logs de erro do Maven e corrigindo projeto...\n`);
+      setBuildLogs(prev => prev + `\n> 🧠 IA: Corrigindo erros para Java ${settings.javaVersion}...\n`);
       
       try {
-          // Extrair as últimas linhas de log relevantes (para não estourar tokens)
-          const relevantLogs = buildLogs.slice(-2000); // Last 2000 chars roughly
-          
+          const relevantLogs = buildLogs.slice(-2000);
           const fixedProject = await fixPluginCode(project, relevantLogs, settings);
           
           if (onProjectUpdate) {
               onProjectUpdate(fixedProject);
           }
           
-          setBuildLogs(prev => prev + `> 🧠 IA: Correções aplicadas! Clique em "Commit & Push" para testar novamente no Maven.\n`);
-          setBuildStatus('idle'); // Reset status so user can push again
+          setBuildLogs(prev => prev + `> 🧠 IA: Código corrigido! Tente "Commit & Push" novamente.\n`);
+          setBuildStatus('idle');
       } catch (e: any) {
           setBuildLogs(prev => prev + `> 🧠 IA Erro: ${e.message}\n`);
       } finally {
@@ -354,11 +350,11 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
             <div className="flex items-center gap-2 text-xs font-mono">
               <Terminal className="w-3 h-3 text-gray-400" />
-              <span className="text-gray-300">Terminal: Maven Logs</span>
+              <span className="text-gray-300">Terminal: Maven Logs (Java {settings.javaVersion})</span>
               
-              {buildStatus === 'in_progress' && <span className="text-yellow-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Compilando com Maven...</span>}
-              {buildStatus === 'success' && <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Sucesso (JAR no target/)</span>}
-              {buildStatus === 'failure' && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3"/> Falha no Maven</span>}
+              {buildStatus === 'in_progress' && <span className="text-yellow-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Compilando...</span>}
+              {buildStatus === 'success' && <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Sucesso (JAR gerado)</span>}
+              {buildStatus === 'failure' && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3"/> Erro no Build</span>}
               
               {isFixing && <span className="text-purple-400 flex items-center gap-1"><Wand2 className="w-3 h-3 animate-pulse"/> Corrigindo com IA...</span>}
             </div>
