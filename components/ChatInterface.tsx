@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, Wrench, Search, Code, CheckCircle2 } from 'lucide-react';
+import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, Wrench, Search, Code, CheckCircle2, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode, fixPluginCode } from '../services/geminiService';
 
@@ -29,13 +29,13 @@ const REASONING_STEPS = [
 ];
 
 const FIX_REASONING_STEPS = [
-  "Injetando logs de erro no núcleo da IA...",
-  "Analizando pilha de erros (Stack Trace)...",
-  "Identificando falhas de compilação ou dependências...",
-  "Mapeando correções necessárias no pom.xml e código...",
+  "Injetando logs de erro no núcleo de processamento...",
+  "Rastreando falhas na pilha de chamadas (Stack Trace)...",
+  "Identificando divergências de dependência no pom.xml...",
+  "Localizando erros de compilação em tempo real...",
   "Gerando patch de correção estrutural...",
-  "Validando integridade do projeto corrigido...",
-  "Finalizando reparo automático..."
+  "Validando integridade do workspace...",
+  "Finalizando reparo automático com sucesso..."
 ];
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -66,6 +66,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages, isLoading, progress, reasoningStep]);
 
+  // Detector de Requisições Externas (Auto-Fix Automático do Console)
   useEffect(() => {
     if (externalRequest && !isLoading) {
       handleProcessRequest(externalRequest.prompt, externalRequest.isFix);
@@ -89,9 +90,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
-    // Se for Auto-Fix, mostramos os logs no balão azul (usuário) conforme solicitado
+    // Cabeçalho estilizado para Auto-Fix Automático com logs reais no chat
     const displayMessageText = isFix 
-      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`bash\n${text}\n\`\`\``
+      ? `🔧 **Auto-Fix Automático Acionado**\nO sistema detectou uma falha no build. Enviando logs para análise da IA...\n\n\`\`\`bash\n${text}\n\`\`\``
       : text;
 
     const userMessage: ChatMessage = { 
@@ -105,7 +106,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsLoading(true);
     setIsFixingMode(isFix);
     setProgress(0);
-    setLoadingText(isFix ? 'Debugando Erros...' : (currentProject ? 'Aprimorando...' : 'Codificando...'));
+    setLoadingText(isFix ? 'Debugando Erros...' : (currentProject ? 'Refatorando...' : 'Arquitetando...'));
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
@@ -139,7 +140,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       clearInterval(progressInterval);
       const errorMessage: ChatMessage = {
         role: 'model',
-        text: error.message || "Houve um problema crítico na correção automática.",
+        text: error.message || "Houve uma falha crítica no processo de correção.",
         isError: true
       };
       setMessages([...newMessages, errorMessage]);
@@ -170,7 +171,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   return (
     <div className="flex flex-col h-full relative z-10">
        <div className="absolute top-2 right-4 z-10 flex gap-2">
-        <button onClick={handleClear} className="text-gray-400 hover:text-red-400 p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700 shadow-md"><Trash2 className="w-4 h-4" /></button>
+        <button onClick={handleClear} className="text-gray-400 hover:text-red-400 p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700 shadow-lg"><Trash2 className="w-4 h-4" /></button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24 custom-scrollbar">
@@ -184,22 +185,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               {msg.role === 'model' && (
-                <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center flex-shrink-0 border border-gray-700 mt-1 shadow-lg">
+                <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center flex-shrink-0 border border-gray-700 mt-1 shadow-lg ring-1 ring-white/5">
                   {msg.isError ? <AlertCircle className="w-5 h-5 text-red-500" /> : <Bot className="w-5 h-5 text-mc-accent" />}
                 </div>
               )}
-              <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-lg backdrop-blur-sm ${msg.role === 'user' ? 'bg-mc-accent text-white rounded-br-none' : msg.isError ? 'bg-red-900/40 border border-red-500/50 text-red-100 rounded-bl-none' : 'bg-mc-panel/90 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
+              <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-lg backdrop-blur-sm ${msg.role === 'user' ? (msg.text.includes('🔧') ? 'bg-blue-600/90 border border-blue-400/30' : 'bg-mc-accent') + ' text-white rounded-br-none' : msg.isError ? 'bg-red-900/40 border border-red-500/50 text-red-100 rounded-bl-none' : 'bg-mc-panel/90 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                 {msg.projectData && (
                   <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center justify-between text-[11px]">
                     <div className="text-mc-green font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Patch Aplicado
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Patch Aplicado automaticamente
                     </div>
                   </div>
                 )}
               </div>
               {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1 shadow-lg"><User className="w-5 h-5 text-gray-300" /></div>
+                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 mt-1 shadow-lg ring-1 ring-white/5"><User className="w-5 h-5 text-gray-300" /></div>
               )}
             </motion.div>
           ))}
@@ -213,7 +214,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           >
             <div className="flex gap-4 items-start">
                <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center border border-gray-700 shadow-lg mt-1"><Cpu className="w-5 h-5 text-mc-accent animate-pulse" /></div>
-               <div className="bg-mc-panel/90 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 flex flex-col gap-3 min-w-[280px] shadow-[0_0_20px_rgba(0,0,0,0.4)]">
+               <div className="bg-mc-panel/90 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 flex flex-col gap-3 min-w-[280px] shadow-[0_0_30px_rgba(0,0,0,0.5)] ring-1 ring-white/5">
                   <div className="flex justify-between items-center text-xs text-gray-400 font-mono">
                     <span className="flex items-center gap-2">
                         {isFixingMode ? <Wrench className="w-3 h-3 text-orange-400 animate-spin" /> : <Loader2 className="w-3 h-3 animate-spin text-mc-accent" />} 
@@ -226,13 +227,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     <motion.div 
                       initial={{ width: 0 }}
                       animate={{ width: `${progress}%` }}
-                      className={`h-full shadow-[0_0_8px_rgba(59,130,246,0.5)] ${isFixingMode ? 'bg-orange-500 shadow-orange-500/50' : 'bg-mc-accent shadow-mc-accent/50'}`} 
-                    />
+                      className={`h-full relative overflow-hidden ${isFixingMode ? 'bg-orange-500 shadow-orange-500/50' : 'bg-mc-accent shadow-mc-accent/50'}`} 
+                    >
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] animate-[shimmer_1.5s_infinite]" />
+                    </motion.div>
                   </div>
 
                   <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2">
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-widest opacity-80">
-                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} {isFixingMode ? "Análise de Erros" : "Pensamento Computacional"}
+                    <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-[0.2em] opacity-80">
+                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} {isFixingMode ? "Deep Debugging" : "Pensamento Computacional"}
                     </div>
                     <div className="flex items-start gap-2 min-h-[30px]">
                       <TerminalIcon className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />
@@ -258,12 +261,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       <div className="absolute bottom-0 left-0 right-0 p-4 pt-10 bg-gradient-to-t from-mc-dark via-mc-dark to-transparent z-10">
         <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto">
-          <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder={currentProject ? "Diga o que quer alterar..." : "Crie um plugin..."} className="w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent text-sm" disabled={isLoading} />
+          <input 
+            type="text" 
+            value={input} 
+            onChange={(e) => setInput(e.target.value)} 
+            placeholder={currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin..."} 
+            className="w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent text-sm" 
+            disabled={isLoading} 
+          />
           <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-colors disabled:opacity-50 flex items-center justify-center">
             {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         </form>
       </div>
+
+      <style>{`
+        @keyframes shimmer {
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
     </div>
   );
 };

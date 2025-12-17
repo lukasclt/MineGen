@@ -129,8 +129,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ FALHA: Build falhou. Analisando logs para Auto-Fix...\n`);
-                         // Aguarda 3 segundos para dar o "efeito" de análise antes de disparar o Auto-Fix automático
-                         setTimeout(handleAutoFix, 3000);
+                         // Aguarda 2.5 segundos para o efeito visual antes de disparar o Auto-Fix automático
+                         setTimeout(handleAutoFix, 2500);
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -148,7 +148,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   };
 
   const handleAutoFix = async () => {
-    if (!project || !lastRunId || !settings.github || !onTriggerAutoFix) return;
+    if (!project || !lastRunId || !settings.github || !onTriggerAutoFix || isFixingInProgressRef.current) return;
     
     try {
         const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
@@ -158,17 +158,20 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         const errorStartIndex = lines.findIndex(l => l.includes('[ERROR]') || l.includes('Compilation failure') || l.includes('Could not resolve dependencies'));
         let relevantLogs = realLogs;
         if (errorStartIndex !== -1) {
-            relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5), errorStartIndex + 40).join('\n');
+            relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5), errorStartIndex + 50).join('\n');
         }
         
-        // Se ainda for muito grande, corta
-        if (relevantLogs.length > 6000) {
-            relevantLogs = relevantLogs.substring(0, 6000);
+        // Se ainda for muito grande, corta para manter dentro do limite da janela de contexto
+        if (relevantLogs.length > 7000) {
+            relevantLogs = relevantLogs.substring(0, 7000);
         }
         
         isFixingInProgressRef.current = true;
         setFixCount(prev => prev + 1);
+        
+        // Dispara o trigger para o ChatInterface que iniciará a correção automaticamente
         onTriggerAutoFix(relevantLogs);
+        setBuildLogs(prev => prev + `> 🔧 Auto-Fix acionado automaticamente. Verifique o chat para detalhes.\n`);
     } catch (e: any) {
         setBuildLogs(prev => prev + `> ⚠️ Falha ao ler logs: ${e.message}\n`);
         isFixingInProgressRef.current = false;
@@ -197,7 +200,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                 {settings.name}
                 {isFixingInProgressRef.current && (
                   <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/50 text-orange-400 text-[10px] animate-pulse">
-                    <Zap className="w-2.5 h-2.5" /> AUTO-FIXING
+                    <Zap className="w-2.5 h-2.5" /> AUTO-FIXING EM CURSO
                   </span>
                 )}
             </h3>
@@ -301,6 +304,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      </div>
                    </div>
                 )}
+                {buildStatus === 'failure' && <span className="text-red-500 font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> FALHA DETECTADA</span>}
               </div>
               <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white transition-colors"><ChevronDown className="w-5 h-5" /></button>
             </div>
