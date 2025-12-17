@@ -1,18 +1,18 @@
 
 import React, { useState, useEffect } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, RefreshCw, HardDrive } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import JSZip from 'jszip';
 
 interface CodeViewerProps {
   project: GeneratedProject | null;
   settings: PluginSettings;
+  directoryHandle: any;
   onProjectUpdate?: (newProject: GeneratedProject) => void;
   onTriggerAutoFix?: (logs: string) => void;
 }
 
-const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings }) => {
+const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHandle }) => {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
@@ -35,19 +35,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings }) => {
     }
   };
 
-  const handleDownloadSource = async () => {
-    if (!project) return;
-    const zip = new JSZip();
-    project.files.forEach(file => zip.file(file.path, file.content));
-    const blob = await zip.generateAsync({type:"blob"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${settings.name}-src.zip`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
-
   if (!project) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 h-full p-8 text-center border-l border-gray-800"><FileCode className="w-16 h-16 mb-4 opacity-20" /><p className="text-lg font-medium">Crie um plugin para ver o código</p></div>;
 
   return (
@@ -58,10 +45,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings }) => {
                 {settings.name}
             </h3>
             
-            <div className="flex items-center gap-2">
-                <button onClick={handleDownloadSource} className="text-xs bg-mc-accent hover:bg-blue-600 text-white font-semibold px-3 py-1.5 rounded flex items-center gap-2 transition-colors active:scale-95 shadow-md">
-                    <Download className="w-3 h-3" /> Download Fonte (.zip)
-                </button>
+            <div className="flex items-center gap-3">
+                {directoryHandle ? (
+                   <div className="flex items-center gap-2 text-xs bg-mc-green/10 text-mc-green border border-mc-green/30 px-3 py-1.5 rounded-full animate-pulse">
+                      <HardDrive className="w-3 h-3" />
+                      <span className="font-mono font-semibold">{directoryHandle.name}</span>
+                      <RefreshCw className="w-3 h-3 ml-1 animate-spin-slow" />
+                   </div>
+                ) : (
+                  <div className="text-xs text-gray-500 italic">Nenhuma pasta vinculada</div>
+                )}
             </div>
         </div>
 

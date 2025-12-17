@@ -1,9 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2 } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode } from '../services/geminiService';
+import { getDirectoryHandle, saveProjectToDisk } from '../services/fileSystem';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
@@ -13,8 +14,9 @@ interface ChatInterfaceProps {
   onProjectGenerated: (project: any) => void;
   onClearProject: () => void;
   onUpdateProjectName: (name: string) => void;
-  externalRequest?: { prompt: string, isFix: boolean } | null;
-  clearExternalRequest?: () => void;
+  // File System
+  directoryHandle: any;
+  onSetDirectoryHandle: (handle: any) => void;
 }
 
 const REASONING_STEPS = [
@@ -36,14 +38,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   onProjectGenerated, 
   onClearProject,
   onUpdateProjectName,
-  externalRequest,
-  clearExternalRequest
+  directoryHandle,
+  onSetDirectoryHandle
 }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [loadingText, setLoadingText] = useState('');
   const [reasoningStep, setReasoningStep] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -54,13 +57,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading, progress, reasoningStep]);
-
-  useEffect(() => {
-    if (externalRequest && !isLoading) {
-      handleProcessRequest(externalRequest.prompt);
-      if (clearExternalRequest) clearExternalRequest();
-    }
-  }, [externalRequest, isLoading]);
 
   useEffect(() => {
     let interval: number;
@@ -74,8 +70,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => clearInterval(interval);
   }, [isLoading]);
 
+  const handleSelectFolder = async () => {
+    try {
+      const handle = await getDirectoryHandle();
+      onSetDirectoryHandle(handle);
+      return handle;
+    } catch (error: any) {
+      alert("É necessário selecionar uma pasta para continuar.\n" + error.message);
+      return null;
+    }
+  };
+
   const handleProcessRequest = async (text: string) => {
     if (!text.trim() || isLoading) return;
+
+    // MANDATORY FOLDER SELECTION LOGIC
+    let currentHandle = directoryHandle;
+    if (!currentHandle) {
+       const confirmSelect = window.confirm("MineGen AI precisa de uma pasta local para salvar o plugin automaticamente.\nDeseja selecionar a pasta agora?");
+       if (!confirmSelect) return;
+       
+       currentHandle = await handleSelectFolder();
+       if (!currentHandle) return; // User cancelled or error
+    }
 
     const userMessage: ChatMessage = { 
       role: 'user', 
@@ -97,11 +114,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }, 400);
 
     try {
+      // 1. Generate Code
       const project = await generatePluginCode(text, settings, currentProject);
       
       clearInterval(progressInterval);
+      setProgress(98);
+      setLoadingText('Salvando arquivos no disco...');
+      setIsSaving(true);
+
+      // 2. Auto-Save to Disk
+      await saveProjectToDisk(currentHandle, project);
+      setIsSaving(false);
       setProgress(100);
-      setLoadingText('Sincronizando...');
+
       await new Promise(resolve => setTimeout(resolve, 800));
       
       const aiMessage: ChatMessage = {
@@ -114,6 +139,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       onProjectGenerated(project);
     } catch (error: any) {
       clearInterval(progressInterval);
+      setIsSaving(false);
       const errorMessage: ChatMessage = {
         role: 'model',
         text: error.message || "Houve uma falha crítica no processo de geração.",
@@ -167,7 +193,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {msg.projectData && (
                   <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center justify-between text-[11px]">
                     <div className="text-mc-green font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Projeto Gerado
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Projeto Gerado & Salvo
                     </div>
                   </div>
                 )}
@@ -190,7 +216,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                <div className="bg-mc-panel/90 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 flex flex-col gap-3 min-w-[280px] shadow-[0_0_30px_rgba(0,0,0,0.5)] ring-1 ring-white/5">
                   <div className="flex justify-between items-center text-xs text-gray-400 font-mono">
                     <span className="flex items-center gap-2">
-                        <Loader2 className="w-3 h-3 animate-spin text-mc-accent" /> 
+                        {isSaving ? <FolderInput className="w-3 h-3 animate-bounce text-mc-gold" /> : <Loader2 className="w-3 h-3 animate-spin text-mc-accent" />} 
                         {loadingText}
                     </span>
                     <span className="text-mc-accent font-bold tracking-tighter">{Math.round(progress)}%</span>
@@ -238,12 +264,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             type="text" 
             value={input} 
             onChange={(e) => setInput(e.target.value)} 
-            placeholder={currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin..."} 
-            className="w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500" 
+            placeholder={directoryHandle ? (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...") : "Digite para selecionar a pasta de destino..."} 
+            className={`w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border ${!directoryHandle ? 'border-mc-gold/50 shadow-[0_0_15px_rgba(255,170,0,0.1)]' : 'border-gray-600'} rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500`} 
             disabled={isLoading} 
           />
           <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95">
-            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (!directoryHandle ? <FolderInput className="w-5 h-5" /> : <Send className="w-5 h-5" />)}
           </button>
         </form>
       </div>

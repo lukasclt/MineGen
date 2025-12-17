@@ -22,12 +22,11 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
+  // File System State (Runtime only, not saved in localStorage due to security)
+  const [directoryHandle, setDirectoryHandle] = useState<any>(null);
+
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
-
-  // PWA Install State
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallButton, setShowInstallButton] = useState(false);
 
   useEffect(() => {
     try {
@@ -68,25 +67,10 @@ const App: React.FC = () => {
     }
   }, [currentProjectId, isLoaded]);
 
+  // Reset folder handle when project changes (optional, keeps strict separate folders)
   useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowInstallButton(true);
-    };
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-  }, []);
-
-  const handleInstallClick = () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then(() => {
-        setDeferredPrompt(null);
-        setShowInstallButton(false);
-      });
-    }
-  };
+    setDirectoryHandle(null);
+  }, [currentProjectId]);
 
   const createNewProject = () => {
     const newProject: SavedProject = {
@@ -96,7 +80,7 @@ const App: React.FC = () => {
       settings: { ...DEFAULT_SETTINGS },
       messages: [{
         role: 'model',
-        text: `Olá! Eu sou o MineGen AI. Configure seu projeto na barra lateral e me diga o que você quer criar!`
+        text: `Olá! Configure o projeto e digite algo. Você precisará selecionar uma pasta local para salvar o código automaticamente.`
       }],
       generatedProject: null
     };
@@ -164,8 +148,6 @@ const App: React.FC = () => {
         onDeleteProject={deleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
         setSettings={handleSettingsChange}
-        showInstallButton={showInstallButton}
-        onInstall={handleInstallClick}
       />
 
       <div className="flex-1 flex flex-col md:flex-row h-full relative z-10">
@@ -189,6 +171,9 @@ const App: React.FC = () => {
               onProjectGenerated={handleProjectGenerated}
               onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
               onUpdateProjectName={(name) => updateActiveProject({ name })}
+              // File System Props
+              directoryHandle={directoryHandle}
+              onSetDirectoryHandle={setDirectoryHandle}
             />
           )}
         </div>
@@ -197,7 +182,7 @@ const App: React.FC = () => {
           <CodeViewer 
             project={activeProject?.generatedProject || null} 
             settings={activeProject?.settings || DEFAULT_SETTINGS}
-            onProjectUpdate={handleProjectGenerated}
+            directoryHandle={directoryHandle}
           />
         </div>
       </div>
