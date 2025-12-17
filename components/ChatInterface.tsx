@@ -90,9 +90,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
+    // Se for fix, mostramos os logs no chat para o usuário ver o que deu erro
+    const displayMessageText = isFix 
+      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`\n${text}\n\`\`\``
+      : text;
+
     const userMessage: ChatMessage = { 
       role: 'user', 
-      text: isFix ? "🔧 **Auto-Fix Obrigatório**\nErro de compilação detectado. Reparando projeto..." : text 
+      text: displayMessageText 
     };
     
     setMessages([...messages, userMessage]);
@@ -104,10 +109,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
-        if (prev >= 90) return 90;
-        return prev + Math.max(1, (90 - prev) / 10);
+        if (prev >= 95) return 95;
+        return prev + Math.max(0.5, (95 - prev) / 15);
       });
-    }, 400);
+    }, 500);
 
     try {
       let project;
