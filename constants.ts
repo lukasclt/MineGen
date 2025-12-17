@@ -20,72 +20,49 @@ export const MC_VERSIONS = [
   "1.12.2", "1.8.8"
 ];
 
-// Prompt Tipo C: Context, Constraints, Content
+// Prompt Tipo C: Context, Content, Constraints (Full Maven Focus)
 export const SYSTEM_INSTRUCTION = `
-# CONTEXTO
-Você é um Engenheiro de Software Sênior especializado em servidores de Minecraft.
-Sua missão é gerar código Java impecável para Spigot, Paper, Velocity ou BungeeCord usando Maven.
+# CONTEXT (CONTEXTO)
+Você é um Arquiteto de Software Sênior especializado no ecossistema Minecraft (Spigot, Paper, Velocity, BungeeCord).
+Sua responsabilidade é criar projetos **Maven** profissionais, completos e prontos para produção.
 
-# PRESERVAÇÃO DE ARQUIVOS (CRÍTICO - REGRA DE OURO)
-1. **NUNCA delete ou omita arquivos existentes**: O campo "files" no seu JSON de resposta DEVE conter a lista COMPLETA de todos os arquivos do projeto.
-2. Se você estiver alterando apenas uma linha no 'pom.xml', você ainda DEVE incluir todas as classes '.java', arquivos '.yml' e o próprio 'pom.xml' na resposta.
-3. Arquivos omitidos da lista serão deletados do workspace do usuário. **NÃO cause perda de dados.**
+# CONTENT (CONTEÚDO)
+Gere uma estrutura de projeto completa baseada na solicitação do usuário.
+O projeto DEVE ser totalmente funcional apenas com o comando 'mvn package'.
 
-# RESTRIÇÕES (CONSTRAINTS)
-1. **Sistema de Build (Maven)**:
-   - Use 'pom.xml' completo e válido.
-   - Configure dependências e repositórios corretos para a plataforma escolhida.
-   - Configure o 'maven-compiler-plugin' para a versão Java solicitada.
+# CONSTRAINTS (RESTRIÇÕES)
+1. **Estrutura Maven Rigorosa**:
+   - O arquivo 'pom.xml' é OBRIGATÓRIO e deve ser tecnicamente perfeito.
+   - Use o layout padrão: 'src/main/java/...' para classes e 'src/main/resources/...' para configs (plugin.yml, config.yml).
+   - Inclua SEMPRE o 'maven-shade-plugin' se houver dependências externas.
+   - Configure o 'maven-compiler-plugin' com a versão do Java correta (${'${javaVersion}'}).
 
-2. **Formato de Resposta**:
-   - Responda APENAS com um objeto JSON válido.
-   - NÃO use blocos de código Markdown (ex: \`\`\`json).
+2. **Integridade Absoluta**:
+   - Retorne a lista COMPLETA de arquivos no JSON. NUNCA omita arquivos (ex: não use "o resto do código aqui").
+   - Se alterar um arquivo, reenvie-o inteiro. Arquivos não listados na resposta serão DELETADOS do workspace.
+
+3. **Qualidade de Código**:
+   - Use injeção de dependência onde apropriado.
+   - Siga as convenções de nomenclatura Java.
+   - Para versões antigas (1.8), não use recursos modernos (var, records).
+
+4. **Formato**:
+   - Apenas JSON válido. Sem Markdown.
 
 # ESTRUTURA DO JSON
 {
-  "explanation": "Explicação curta do que foi feito.",
+  "explanation": "Resumo técnico das mudanças.",
   "files": [
     {
-      "path": "src/main/java/...",
-      "content": "conteúdo completo",
+      "path": "pom.xml",
+      "content": "...",
+      "language": "xml"
+    },
+    {
+      "path": "src/main/java/com/exemplo/Main.java",
+      "content": "...",
       "language": "java"
     }
   ]
 }
 `;
-
-export const GITHUB_ACTION_TEMPLATE = (targetJavaVersion: string) => {
-  const version = targetJavaVersion === '1.8' ? '8' : targetJavaVersion;
-  
-  return `name: Build Plugin (Maven)
-
-on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up JDK ${version}
-      uses: actions/setup-java@v4
-      with:
-        java-version: '${version}'
-        distribution: 'temurin'
-        cache: 'maven'
-    
-    - name: Build with Maven
-      run: mvn clean package -B
-      
-    - name: Upload Build Artifact (JAR)
-      uses: actions/upload-artifact@v4
-      with:
-        name: plugin-jar
-        path: target/*.jar
-`;
-};

@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, Wrench, Search, Code, CheckCircle2, History } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generatePluginCode, fixPluginCode } from '../services/geminiService';
+import { generatePluginCode } from '../services/geminiService';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
@@ -28,16 +28,6 @@ const REASONING_STEPS = [
   "Finalizando estrutura do projeto Maven..."
 ];
 
-const FIX_REASONING_STEPS = [
-  "Extraindo logs de erro do sistema de build...",
-  "Rastreando falhas na pilha de chamadas...",
-  "Identificando dependências ausentes no pom.xml...",
-  "Analizando erros de sintaxe ou versão Java...",
-  "Calculando patch de correção estrutural...",
-  "Validando integridade do código corrigido...",
-  "Finalizando reparo automático..."
-];
-
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   settings, 
   messages, 
@@ -54,7 +44,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [progress, setProgress] = useState(0);
   const [loadingText, setLoadingText] = useState('');
   const [reasoningStep, setReasoningStep] = useState(0);
-  const [isFixingMode, setIsFixingMode] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -66,47 +55,39 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages, isLoading, progress, reasoningStep]);
 
-  // Efeito para capturar requisições automáticas do console (Auto-Fix)
   useEffect(() => {
     if (externalRequest && !isLoading) {
-      handleProcessRequest(externalRequest.prompt, externalRequest.isFix);
+      handleProcessRequest(externalRequest.prompt);
       if (clearExternalRequest) clearExternalRequest();
     }
   }, [externalRequest, isLoading]);
 
   useEffect(() => {
     let interval: number;
-    const steps = isFixingMode ? FIX_REASONING_STEPS : REASONING_STEPS;
     if (isLoading) {
       interval = window.setInterval(() => {
-        setReasoningStep(prev => (prev + 1) % steps.length);
+        setReasoningStep(prev => (prev + 1) % REASONING_STEPS.length);
       }, 2500);
     } else {
       setReasoningStep(0);
     }
     return () => clearInterval(interval);
-  }, [isLoading, isFixingMode]);
+  }, [isLoading]);
 
-  const handleProcessRequest = async (text: string, isFix: boolean = false) => {
+  const handleProcessRequest = async (text: string) => {
     if (!text.trim() || isLoading) return;
-
-    // Layout alinhado com a imagem do usuário
-    const displayMessageText = isFix 
-      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`bash\n${text}\n\`\`\``
-      : text;
 
     const userMessage: ChatMessage = { 
       role: 'user', 
-      text: displayMessageText 
+      text: text 
     };
     
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput('');
     setIsLoading(true);
-    setIsFixingMode(isFix);
     setProgress(0);
-    setLoadingText(isFix ? 'Debugando Erros...' : (currentProject ? 'Refatorando...' : 'Arquitetando...'));
+    setLoadingText(currentProject ? 'Refatorando...' : 'Arquitetando...');
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
@@ -116,12 +97,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }, 400);
 
     try {
-      let project;
-      if (isFix && currentProject) {
-          project = await fixPluginCode(currentProject, text, settings);
-      } else {
-          project = await generatePluginCode(text, settings, currentProject);
-      }
+      const project = await generatePluginCode(text, settings, currentProject);
       
       clearInterval(progressInterval);
       setProgress(100);
@@ -140,20 +116,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       clearInterval(progressInterval);
       const errorMessage: ChatMessage = {
         role: 'model',
-        text: error.message || "Houve uma falha crítica no processo de correção.",
+        text: error.message || "Houve uma falha crítica no processo de geração.",
         isError: true
       };
       setMessages([...newMessages, errorMessage]);
     } finally {
       setIsLoading(false);
       setProgress(0);
-      setIsFixingMode(false);
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleProcessRequest(input, false);
+    handleProcessRequest(input);
   };
 
   const handleClear = () => {
@@ -165,8 +140,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         setMessages([defaultMsg]);
     }
   };
-
-  const activeSteps = isFixingMode ? FIX_REASONING_STEPS : REASONING_STEPS;
 
   return (
     <div className="flex flex-col h-full relative z-10">
@@ -189,12 +162,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   {msg.isError ? <AlertCircle className="w-5 h-5 text-red-500" /> : <Bot className="w-5 h-5 text-mc-accent" />}
                 </div>
               )}
-              <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-lg backdrop-blur-sm ${msg.role === 'user' ? (msg.text.includes('🔧') ? 'bg-blue-600/95 border border-blue-400/30' : 'bg-mc-accent') + ' text-white rounded-br-none' : msg.isError ? 'bg-red-900/40 border border-red-500/50 text-red-100 rounded-bl-none' : 'bg-mc-panel/90 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
+              <div className={`max-w-[85%] rounded-2xl px-5 py-3 shadow-lg backdrop-blur-sm ${msg.role === 'user' ? 'bg-mc-accent text-white rounded-br-none' : msg.isError ? 'bg-red-900/40 border border-red-500/50 text-red-100 rounded-bl-none' : 'bg-mc-panel/90 border border-gray-700 text-gray-200 rounded-bl-none'}`}>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                 {msg.projectData && (
                   <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center justify-between text-[11px]">
                     <div className="text-mc-green font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Patch Aplicado
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Projeto Gerado
                     </div>
                   </div>
                 )}
@@ -217,7 +190,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                <div className="bg-mc-panel/90 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 flex flex-col gap-3 min-w-[280px] shadow-[0_0_30px_rgba(0,0,0,0.5)] ring-1 ring-white/5">
                   <div className="flex justify-between items-center text-xs text-gray-400 font-mono">
                     <span className="flex items-center gap-2">
-                        {isFixingMode ? <Wrench className="w-3 h-3 text-orange-400 animate-spin" /> : <Loader2 className="w-3 h-3 animate-spin text-mc-accent" />} 
+                        <Loader2 className="w-3 h-3 animate-spin text-mc-accent" /> 
                         {loadingText}
                     </span>
                     <span className="text-mc-accent font-bold tracking-tighter">{Math.round(progress)}%</span>
@@ -227,7 +200,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     <motion.div 
                       initial={{ width: 0 }}
                       animate={{ width: `${progress}%` }}
-                      className={`h-full relative overflow-hidden ${isFixingMode ? 'bg-orange-500 shadow-orange-500/50' : 'bg-mc-accent shadow-mc-accent/50'}`} 
+                      className="h-full relative overflow-hidden bg-mc-accent shadow-mc-accent/50"
                     >
                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] animate-[shimmer_1.5s_infinite]" />
                     </motion.div>
@@ -235,7 +208,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
                   <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2 shadow-inner">
                     <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-[0.2em] opacity-80">
-                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} {isFixingMode ? "Deep Debugging" : "Pensamento Computacional"}
+                      <BrainCircuit className="w-3 h-3" /> Pensamento Computacional
                     </div>
                     <div className="flex items-start gap-2 min-h-[30px]">
                       <TerminalIcon className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />
@@ -247,7 +220,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                           exit={{ opacity: 0, x: -5 }}
                           className="text-[11px] text-gray-300 font-mono leading-tight italic"
                         >
-                          {activeSteps[reasoningStep]}
+                          {REASONING_STEPS[reasoningStep]}
                         </motion.span>
                       </AnimatePresence>
                     </div>

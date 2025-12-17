@@ -22,9 +22,6 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
-  // External control for Chat Loading (to trigger from CodeViewer)
-  const [externalChatRequest, setExternalChatRequest] = useState<{prompt: string, isFix: boolean} | null>(null);
-
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
 
@@ -142,14 +139,6 @@ const App: React.FC = () => {
     updateActiveProject({ generatedProject: generated });
   };
 
-  const handleTriggerAutoFix = (logs: string) => {
-    // Enviamos apenas os logs, ChatInterface cuida do visual
-    setExternalChatRequest({
-      prompt: logs,
-      isFix: true
-    });
-  };
-
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
   if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
@@ -200,8 +189,6 @@ const App: React.FC = () => {
               onProjectGenerated={handleProjectGenerated}
               onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
               onUpdateProjectName={(name) => updateActiveProject({ name })}
-              externalRequest={externalChatRequest}
-              clearExternalRequest={() => setExternalChatRequest(null)}
             />
           )}
         </div>
@@ -211,7 +198,6 @@ const App: React.FC = () => {
             project={activeProject?.generatedProject || null} 
             settings={activeProject?.settings || DEFAULT_SETTINGS}
             onProjectUpdate={handleProjectGenerated}
-            onTriggerAutoFix={handleTriggerAutoFix}
           />
         </div>
       </div>
