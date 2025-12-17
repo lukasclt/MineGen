@@ -1,20 +1,21 @@
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import OpenAI from 'openai';
 import { PluginSettings, GeneratedProject } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
 
-// The API key must be obtained exclusively from the environment variable process.env.API_KEY.
-// We assume it is available as per guidelines.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Configuration for OpenRouter
+const client = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.API_KEY,
+  dangerouslyAllowBrowser: true, // Needed for client-side usage
+  defaultHeaders: {
+    "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "https://minegen.ai",
+    "X-Title": "MineGen AI",
+  }
+});
 
 const getModel = (settings?: PluginSettings) => {
-  const requested = settings?.aiModel;
-  // If the user provides a full model name that includes hyphens, use it directly.
-  // We filter out legacy 'google/' prefixes from OpenRouter.
-  if (requested && !requested.startsWith("google/") && (requested.startsWith("gemini-") || requested.startsWith("veo-"))) {
-    return requested;
-  }
-  // Default for Complex Text Tasks (coding) as per guidelines
-  return "gemini-3-pro-preview";
+  // Return the model string from settings, or default to a Gemini model on OpenRouter
+  return settings?.aiModel || "google/gemini-2.0-flash-001";
 };
 
 // Helper to sanitize JSON string (remove markdown code blocks)
@@ -29,42 +30,13 @@ const parseJSON = (text: string) => {
   }
 };
 
-const PROJECT_SCHEMA: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    explanation: { type: Type.STRING },
-    files: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          path: { type: Type.STRING },
-          content: { type: Type.STRING },
-          language: { type: Type.STRING }
-        },
-        required: ["path", "content", "language"]
-      }
-    }
-  },
-  required: ["explanation", "files"]
-};
-
-const BUILD_RESULT_SCHEMA: Schema = {
-  type: Type.OBJECT,
-  properties: {
-    success: { type: Type.BOOLEAN },
-    logs: { type: Type.STRING }
-  },
-  required: ["success", "logs"]
-};
-
 export const generatePluginCode = async (
   prompt: string, 
   settings: PluginSettings,
   previousProject?: GeneratedProject | null
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
-  
+
   let userPromptContext = "";
 
   if (previousProject && previousProject.files.length > 0) {
@@ -100,24 +72,33 @@ export const generatePluginCode = async (
     `;
   }
 
+  const systemPrompt = `${SYSTEM_INSTRUCTION}
+
+  IMPORTANTE: Responda estritamente com JSON válido.
+  Formato esperado:
+  {
+    "explanation": "string (em português)",
+    "files": [ { "path": "string", "content": "string", "language": "string" } ]
+  }
+  `;
+
   try {
-    const response = await ai.models.generateContent({
+    const completion = await client.chat.completions.create({
       model: model,
-      contents: userPromptContext,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: PROJECT_SCHEMA,
-      }
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPromptContext }
+      ],
+      response_format: { type: "json_object" }
     });
 
-    const text = response.text;
+    const text = completion.choices[0]?.message?.content;
     if (!text) throw new Error("Sem resposta da IA");
     
     return parseJSON(text);
   } catch (error: any) {
     console.error("Generate Error:", error);
-    throw new Error(error.message || "Falha ao gerar o código do plugin.");
+    throw new Error(error.message || "Falha ao gerar o código do plugin via OpenRouter.");
   }
 };
 
@@ -142,20 +123,25 @@ export const simulateGradleBuild = async (
     
     Se NÃO houver erros, retorne success: true.
     Se HOUVER erros, retorne success: false e forneça um output detalhado estilo "build log" explicando os erros.
+    
+    Response JSON Schema:
+    {
+      "success": boolean,
+      "logs": "string (simulated terminal output)"
+    }
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const completion = await client.chat.completions.create({
       model: model,
-      contents: prompt + "\n\nCÓDIGO PARA VERIFICAR:\n" + fileContext,
-      config: {
-        systemInstruction: "Você é um Simulador de Compilador Java/Gradle.",
-        responseMimeType: "application/json",
-        responseSchema: BUILD_RESULT_SCHEMA
-      }
+      messages: [
+        { role: "system", content: "Você é um Simulador de Compilador Java/Gradle. Output JSON." },
+        { role: "user", content: prompt + "\n\nCÓDIGO PARA VERIFICAR:\n" + fileContext }
+      ],
+      response_format: { type: "json_object" }
     });
     
-    const text = response.text;
+    const text = completion.choices[0]?.message?.content;
     if (!text) return { success: false, logs: "Erro: Resposta vazia da IA" };
 
     return parseJSON(text) as BuildResult;
@@ -179,20 +165,21 @@ export const fixPluginCode = async (
     
     Por favor, CORRIJA o código para resolver esses erros de compilação.
     Retorne a estrutura COMPLETA do projeto atualizada (incluindo todos os arquivos, até os não alterados).
+    
+    Responda com JSON estrito combinando com o schema GeneratedProject.
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const completion = await client.chat.completions.create({
       model: model,
-      contents: "CÓDIGO ATUAL:\n" + fileContext + "\n\n" + prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION + "\nCorrija o código baseado nos logs de erro.",
-        responseMimeType: "application/json",
-        responseSchema: PROJECT_SCHEMA
-      }
+      messages: [
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nCorrija o código baseado nos logs de erro." },
+        { role: "user", content: "CÓDIGO ATUAL:\n" + fileContext + "\n\n" + prompt }
+      ],
+      response_format: { type: "json_object" }
     });
 
-    const text = response.text;
+    const text = completion.choices[0]?.message?.content;
     if (!text) throw new Error("Sem resposta da IA");
 
     return parseJSON(text);

@@ -1,17 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Loader2, Sparkles, AlertCircle, Trash2, Cpu } from 'lucide-react';
+import { Send, Bot, User, Loader2, Sparkles, AlertCircle, Trash2, Cpu, Edit2 } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
+  messages: ChatMessage[];
+  setMessages: (msgs: ChatMessage[]) => void;
   currentProject: GeneratedProject | null;
   onProjectGenerated: (project: any) => void;
   onClearProject: () => void;
+  onUpdateProjectName: (name: string) => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject, onProjectGenerated, onClearProject }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
+  settings, 
+  messages, 
+  setMessages, 
+  currentProject, 
+  onProjectGenerated, 
+  onClearProject,
+  onUpdateProjectName
+}) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
@@ -20,45 +30,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
   const [loadingText, setLoadingText] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  // Load chat history
-  useEffect(() => {
-    const savedChat = localStorage.getItem('minegen_chat_history');
-    if (savedChat) {
-      try {
-        setMessages(JSON.parse(savedChat));
-      } catch (e) {
-        console.error("Failed to parse chat history");
-        setDefaultMessage();
-      }
-    } else {
-      setDefaultMessage();
-    }
-    setIsLoaded(true);
-  }, []);
-
-  // Save chat history
-  useEffect(() => {
-    if (isLoaded) {
-      localStorage.setItem('minegen_chat_history', JSON.stringify(messages));
-    }
-  }, [messages, isLoaded]);
-
-  const setDefaultMessage = () => {
-    setMessages([{
-        role: 'model',
-        text: `Olá! Eu sou o MineGen AI. Posso gerar um plugin ${settings.platform} para Minecraft ${settings.mcVersion} (${settings.javaVersion}). Me diga o que você quer que o seu plugin faça!`
-    }]);
-  };
-
-  const clearChat = () => {
-    if (window.confirm("Iniciar um novo projeto? Isso limpará o chat e o código atual.")) {
-      setDefaultMessage();
-      localStorage.removeItem('minegen_chat_history');
-      onClearProject(); // Reset the project in App.tsx
-    }
-  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -66,23 +37,34 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading, isLoaded, progress]);
+  }, [messages, isLoading, progress]);
+
+  // Handle first user message to name the project automatically
+  useEffect(() => {
+    if (messages.length === 2 && messages[1].role === 'user') {
+      const firstUserMsg = messages[1].text;
+      // Simple logic: grab first 4 words or up to 20 chars
+      const suggestedName = firstUserMsg.split(' ').slice(0, 4).join(' ').substring(0, 25);
+      if (suggestedName) {
+        onUpdateProjectName(suggestedName);
+      }
+    }
+  }, [messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userMessage: ChatMessage = { role: 'user', text: input };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages([...messages, userMessage]);
     setInput('');
     setIsLoading(true);
     setProgress(0);
-    setLoadingText(currentProject ? 'Analisando alterações...' : 'Iniciando arquitetura...');
+    setLoadingText(currentProject ? 'Analisando alterações...' : 'Arquitetando plugin...');
 
     // Simulation Interval
     const progressInterval = setInterval(() => {
       setProgress(prev => {
-        // Slow down as we get closer to 90%, never hit 100% until done
         if (prev >= 90) return 90;
         const increment = Math.max(1, (90 - prev) / 10); 
         return prev + increment;
@@ -96,10 +78,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
       // Stop simulation
       clearInterval(progressInterval);
       setProgress(100);
-      setLoadingText('Finalizando e compilando...');
+      setLoadingText('Gerando arquivos...');
 
-      // Wait 3 seconds before showing result
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Small delay for UX
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       const aiMessage: ChatMessage = {
         role: 'model',
@@ -107,32 +89,43 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
         projectData: project
       };
       
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages([...messages, userMessage, aiMessage]);
       onProjectGenerated(project);
     } catch (error: any) {
       clearInterval(progressInterval);
       const errorMessage: ChatMessage = {
         role: 'model',
-        text: error.message || "Ocorreu um erro ao gerar o plugin.",
+        text: error.message || "Ocorreu um erro ao gerar o plugin. Verifique sua conexão com a OpenRouter.",
         isError: true
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages([...messages, userMessage, errorMessage]);
     } finally {
       setIsLoading(false);
       setProgress(0);
     }
   };
 
-  if (!isLoaded) return null;
+  const handleClear = () => {
+    if (confirm("Limpar conversa deste projeto? O código gerado será mantido, mas o histórico de chat será resetado.")) {
+        // Just reset messages to default, keep project data? 
+        // Or user wanted to clear everything? The prop implies clear project.
+        // Let's clear messages but keep the initial greeting.
+        const defaultMsg: ChatMessage = { 
+            role: 'model', 
+            text: `Histórico limpo. Como posso ajudar com o plugin ${settings.name}?` 
+        };
+        setMessages([defaultMsg]);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full relative z-10">
-       {/* Chat Header with Clear Button */}
-       <div className="absolute top-2 right-4 z-10">
+       {/* Chat Header Actions */}
+       <div className="absolute top-2 right-4 z-10 flex gap-2">
         <button 
-          onClick={clearChat}
+          onClick={handleClear}
           className="text-gray-400 hover:text-red-400 p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700 hover:border-red-900"
-          title="Novo Projeto (Limpar Histórico)"
+          title="Limpar Conversa"
         >
           <Trash2 className="w-4 h-4" />
         </button>
@@ -143,7 +136,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'model' && (
-              <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center flex-shrink-0 border border-gray-700 shadow-lg">
+              <div className="w-8 h-8 rounded-full bg-mc-panel flex items-center justify-center flex-shrink-0 border border-gray-700 shadow-lg mt-1">
                 {msg.isError ? <AlertCircle className="w-5 h-5 text-red-500" /> : <Bot className="w-5 h-5 text-mc-accent" />}
               </div>
             )}
@@ -160,14 +153,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
                 <div className="mt-3 pt-3 border-t border-gray-600/50">
                   <div className="flex items-center gap-2 text-xs text-mc-green font-medium">
                     <Sparkles className="w-3 h-3" />
-                    {currentProject ? 'Projeto Atualizado com Sucesso' : 'Projeto Gerado com Sucesso'}
+                    {currentProject ? 'Alterações Aplicadas' : 'Projeto Criado'}
                   </div>
                 </div>
               )}
             </div>
 
             {msg.role === 'user' && (
-              <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 shadow-lg">
+              <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center flex-shrink-0 shadow-lg mt-1">
                 <User className="w-5 h-5 text-gray-300" />
               </div>
             )}
@@ -206,8 +199,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={currentProject ? "Ex: Adicione uma opção de config para a mensagem..." : "Ex: Crie um plugin que dê diamantes ao entrar..."}
-            className="w-full bg-[#2B2D31]/90 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent focus:ring-1 focus:ring-mc-accent placeholder-gray-500 transition-all"
+            placeholder={currentProject ? "Ex: Adicione um comando /spawn..." : "Ex: Crie um plugin de economia..."}
+            className="w-full bg-[#2B2D31]/90 backdrop-blur-md text-white border border-gray-600 rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent focus:ring-1 focus:ring-mc-accent placeholder-gray-500 transition-all text-sm"
             disabled={isLoading}
           />
           <button
@@ -219,7 +212,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ settings, currentProject,
           </button>
         </form>
         <p className="text-center text-[10px] text-gray-500 mt-2 font-mono opacity-60">
-          IA v2.0 - Código compilável e seguro.
+          Powered by OpenRouter API
         </p>
       </div>
     </div>

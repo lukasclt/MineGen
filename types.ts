@@ -52,3 +52,12 @@ export interface ChatMessage {
   projectData?: GeneratedProject; // Only model messages might have this
   isError?: boolean;
 }
+
+export interface SavedProject {
+  id: string;
+  name: string;
+  lastModified: number;
+  settings: PluginSettings;
+  messages: ChatMessage[];
+  generatedProject: GeneratedProject | null;
+}
