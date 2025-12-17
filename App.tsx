@@ -6,7 +6,7 @@ import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { generatePluginCode } from './services/geminiService';
+import { generatePluginCode, fixPluginCode } from './services/geminiService';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -16,14 +16,15 @@ const generateUUID = () => {
 };
 
 const App: React.FC = () => {
-  // Fix: Initializer for useState should be a parameterless function or a value. 
-  // This fix ensures sidebarOpen is correctly inferred as a boolean.
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => window.innerWidth > 768);
   const [isLoaded, setIsLoaded] = useState(false);
   
   // Projects State
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+
+  // External control for Chat Loading (to trigger from CodeViewer)
+  const [externalChatRequest, setExternalChatRequest] = useState<{prompt: string, isFix: boolean} | null>(null);
 
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
@@ -142,6 +143,13 @@ const App: React.FC = () => {
     updateActiveProject({ generatedProject: generated });
   };
 
+  const handleTriggerAutoFix = (logs: string) => {
+    setExternalChatRequest({
+      prompt: `Detectei um erro no build do Maven. Aqui estão os logs:\n\n${logs}\n\nPor favor, analise e corrija o código do plugin.`,
+      isFix: true
+    });
+  };
+
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
   if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
@@ -192,6 +200,8 @@ const App: React.FC = () => {
               onProjectGenerated={handleProjectGenerated}
               onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
               onUpdateProjectName={(name) => updateActiveProject({ name })}
+              externalRequest={externalChatRequest}
+              clearExternalRequest={() => setExternalChatRequest(null)}
             />
           )}
         </div>
@@ -201,6 +211,7 @@ const App: React.FC = () => {
             project={activeProject?.generatedProject || null} 
             settings={activeProject?.settings || DEFAULT_SETTINGS}
             onProjectUpdate={handleProjectGenerated}
+            onTriggerAutoFix={handleTriggerAutoFix}
           />
         </div>
       </div>

@@ -1,26 +1,24 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-// Renamed Infinity icon to InfinityIcon to avoid collision with global Infinity number used in Framer Motion transitions
 import { FileCode, Copy, Check, FolderOpen, Download, Terminal, RefreshCw, PlayCircle, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon, Sparkles, BrainCircuit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JSZip from 'jszip';
 import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact, getWorkflowRunLogs } from '../services/githubService';
-import { fixPluginCode } from '../services/geminiService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
 
 interface CodeViewerProps {
   project: GeneratedProject | null;
   settings: PluginSettings;
   onProjectUpdate?: (newProject: GeneratedProject) => void;
+  onTriggerAutoFix?: (logs: string) => void;
 }
 
-const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpdate }) => {
+const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpdate, onTriggerAutoFix }) => {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
   const [isCommitting, setIsCommitting] = useState(false);
-  const [isFixing, setIsFixing] = useState(false);
   const [autoFixEterno, setAutoFixEterno] = useState(false);
   const [fixCount, setFixCount] = useState(0);
   
@@ -118,7 +116,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
                          setBuildLogs(prev => prev + `> ✅ SUCESSO: Build concluído!\n`);
-                         setFixCount(0); // Reset count on success
+                         setFixCount(0);
                          const url = await getBuildArtifact(settings.github!, run.id);
                          if (url) setArtifactUrl(url);
                      } else {
@@ -143,36 +141,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   };
 
   const handleAutoFix = async () => {
-    if (!project || !lastRunId || !settings.github || isFixing) return;
+    if (!project || !lastRunId || !settings.github || !onTriggerAutoFix) return;
     
-    setIsFixing(true);
-    setShowConsole(true);
-    setBuildLogs(prev => prev + `> 🧠 Auto-Fix: Analisando logs reais do GitHub...\n`);
-
     try {
         const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
-        // Filtrar apenas partes interessantes do log para economizar tokens
         const errorLogs = realLogs.split('\n').filter(line => line.includes('[ERROR]') || line.includes('Compilation failure')).join('\n');
         
-        const fixedProject = await fixPluginCode(project, errorLogs || realLogs.substring(realLogs.length - 5000), settings);
-        
-        if (onProjectUpdate) onProjectUpdate(fixedProject);
-        
-        setBuildLogs(prev => prev + `> ✨ Auto-Fix: Código corrigido pela IA!\n`);
+        onTriggerAutoFix(errorLogs || realLogs.substring(realLogs.length - 2000));
         setFixCount(prev => prev + 1);
-
-        if (autoFixEterno) {
-            setBuildLogs(prev => prev + `> 🔄 Auto-Fix Eterno: Re-enviando para novo build...\n`);
-            // Pequeno delay para garantir que o estado do React atualizou os arquivos
-            setTimeout(() => {
-                buildInProgressRef.current = false;
-                handleCommitAndPush(true);
-            }, 2000);
-        }
     } catch (e: any) {
-        setBuildLogs(prev => prev + `> ⚠️ Falha no Auto-Fix: ${e.message}\n`);
-    } finally {
-        setIsFixing(false);
+        setBuildLogs(prev => prev + `> ⚠️ Falha ao buscar logs: ${e.message}\n`);
     }
   };
 
@@ -202,7 +180,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                  <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-gray-700 mr-2">
                     <button 
                       onClick={() => handleCommitAndPush()} 
-                      disabled={isCommitting || isFixing || !settings.github?.isConnected} 
+                      disabled={isCommitting || !settings.github?.isConnected} 
                       className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-gray-300 hover:bg-gray-700'}`}
                     >
                         {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
@@ -213,9 +191,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
 
                     <button 
                       onClick={handleAutoFix}
-                      disabled={buildStatus !== 'failure' || isFixing}
-                      className={`text-xs px-2 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'failure' ? 'text-red-400 hover:bg-red-500/10 animate-pulse' : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
-                      title="Auto-Fix: Corrigir erros de build via IA"
+                      disabled={buildStatus !== 'failure'}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'failure' ? 'text-red-400 bg-red-500/10 hover:bg-red-500/20 animate-pulse ring-1 ring-red-500/30' : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
+                      title="Auto-Fix: Corrigir erros de build via IA (Chat)"
                     >
                         <Wrench className="w-3 h-3" />
                         <span className="hidden lg:inline">Fix</span>
@@ -225,10 +203,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     
                     <button 
                       onClick={() => setAutoFixEterno(!autoFixEterno)} 
-                      className={`text-xs px-2 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10' : 'text-gray-500 hover:text-gray-300'}`}
                       title="Auto-Fix Eterno: Tenta corrigir e buildar sozinho até funcionar"
                     >
-                        {/* Using the renamed InfinityIcon component to avoid shadowing the global Infinity number used in transitions */}
                         <InfinityIcon className={`w-3 h-3 ${autoFixEterno ? 'animate-pulse' : ''}`} />
                         <span className="hidden lg:inline">Eterno</span>
                     </button>
@@ -288,28 +265,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
               )}
             </AnimatePresence>
         </div>
-
-        {isFixing && (
-            <div className="absolute inset-0 z-50 bg-mc-dark/80 backdrop-blur-sm flex items-center justify-center">
-                <div className="flex flex-col items-center gap-4 text-center">
-                    <div className="relative">
-                        <BrainCircuit className="w-16 h-16 text-mc-accent animate-pulse" />
-                        <Sparkles className="w-6 h-6 text-mc-gold absolute -top-1 -right-1 animate-bounce" />
-                    </div>
-                    <div>
-                        <h4 className="text-lg font-bold text-white">IA Corrigindo Erros...</h4>
-                        <p className="text-sm text-gray-400 max-w-xs">Analisando logs do GitHub e reescrevendo código logicamente.</p>
-                    </div>
-                    <div className="w-48 h-1 bg-gray-700 rounded-full overflow-hidden">
-                        <motion.div 
-                          className="h-full bg-mc-accent"
-                          animate={{ x: [-200, 200] }}
-                          transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
-                        />
-                    </div>
-                </div>
-            </div>
-        )}
       </div>
 
       <AnimatePresence>
