@@ -89,9 +89,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
-    // A mensagem VISUAL no chat segue exatamente o estilo solicitado
+    // Quando é Auto-Fix, mostramos o cabeçalho solicitado + os logs de erro reais no balão
     const displayMessageText = isFix 
-      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...`
+      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`\n${text}\n\`\`\``
       : text;
 
     const userMessage: ChatMessage = { 
@@ -99,7 +99,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       text: displayMessageText 
     };
     
-    // Atualizamos a lista de mensagens IMEDIATAMENTE para mostrar o balão
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput('');
@@ -118,7 +117,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       let project;
       if (isFix && currentProject) {
-          // 'text' aqui contém os logs reais passados pelo CodeViewer
           project = await fixPluginCode(currentProject, text, settings);
       } else {
           project = await generatePluginCode(text, settings, currentProject);
