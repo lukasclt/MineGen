@@ -31,8 +31,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const buildInProgressRef = useRef(false);
   const isFixingInProgressRef = useRef(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
+  const pollIntervalRef = useRef<any>(null);
 
   const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
+
+  useEffect(() => {
+    // Cleanup polling on unmount
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (isFixingInProgressRef.current && project) {
@@ -104,7 +112,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       let attempts = 0;
       let progressSim = 5;
       
-      const pollInterval = setInterval(async () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+
+      pollIntervalRef.current = setInterval(async () => {
           attempts++;
           if (progressSim < 95) {
               progressSim += Math.random() * 2;
@@ -116,7 +126,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
              if (run) {
                  setLastRunId(run.id);
                  if (run.status === 'completed') {
-                     clearInterval(pollInterval);
+                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+                     
                      setBuildProgress(100);
                      buildInProgressRef.current = false;
                      setIsCommitting(false);
@@ -129,8 +140,10 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ FALHA: Build falhou. Analisando logs para Auto-Fix...\n`);
-                         // Aguarda 3 segundos exatos para o efeito visual de análise antes de injetar no chat
-                         setTimeout(handleAutoFix, 3000);
+                         
+                         // Passamos o ID diretamente para evitar problemas de closure stale
+                         const runIdToFix = run.id;
+                         setTimeout(() => handleAutoFix(runIdToFix), 3000);
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -139,7 +152,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           } catch (e) { console.error(e); }
 
           if (attempts > 150) {
-              clearInterval(pollInterval);
+              if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
               setBuildLogs(prev => prev + `> 🛑 TIMEOUT: Runner demorou demais. Abortando.\n`);
               buildInProgressRef.current = false;
               setIsCommitting(false);
@@ -147,13 +160,24 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       }, 4000);
   };
 
-  const handleAutoFix = async () => {
-    if (!project || !lastRunId || !settings.github || !onTriggerAutoFix || isFixingInProgressRef.current) return;
+  const handleAutoFix = async (runIdOverride?: number) => {
+    // Usa o ID passado ou o do estado (fallback)
+    const targetRunId = runIdOverride || lastRunId;
+
+    if (!targetRunId) {
+        setBuildLogs(prev => prev + `> ⚠️ Erro interno: ID do Build perdido. Auto-Fix abortado.\n`);
+        return;
+    }
+
+    if (!project || !settings.github || !onTriggerAutoFix || isFixingInProgressRef.current) {
+        if (!project) setBuildLogs(prev => prev + `> ⚠️ Projeto não encontrado.\n`);
+        if (!settings.github) setBuildLogs(prev => prev + `> ⚠️ GitHub desconectado.\n`);
+        return;
+    }
     
     try {
-        const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
+        const realLogs = await getWorkflowRunLogs(settings.github, targetRunId);
         
-        // Extrair partes relevantes
         const lines = realLogs.split('\n');
         const errorStartIndex = lines.findIndex(l => l.includes('[ERROR]') || l.includes('Compilation failure') || l.includes('Could not resolve dependencies'));
         let relevantLogs = realLogs;
@@ -161,7 +185,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
             relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5), errorStartIndex + 50).join('\n');
         }
         
-        // Limita tamanho
         if (relevantLogs.length > 7000) {
             relevantLogs = relevantLogs.substring(0, 7000);
         }
@@ -169,9 +192,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         isFixingInProgressRef.current = true;
         setFixCount(prev => prev + 1);
         
-        // Trigger automático para o ChatInterface
         onTriggerAutoFix(relevantLogs);
-        setBuildLogs(prev => prev + `> 🔧 Reparo automático iniciado no chat. Analisando arquivos...\n`);
+        setBuildLogs(prev => prev + `> 🔧 Logs enviados para a IA. Verifique o chat...\n`);
     } catch (e: any) {
         setBuildLogs(prev => prev + `> ⚠️ Falha crítica ao ler logs: ${e.message}\n`);
         isFixingInProgressRef.current = false;
