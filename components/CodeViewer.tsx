@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon, Zap } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon, Zap, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JSZip from 'jszip';
 import { commitAndPushFiles, getLatestWorkflowRun, getWorkflowRunLogs } from '../services/githubService';
@@ -129,8 +129,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ FALHA: Build falhou. Analisando logs para Auto-Fix...\n`);
-                         // Aguarda 2.5 segundos para o efeito visual antes de disparar o Auto-Fix automático
-                         setTimeout(handleAutoFix, 2500);
+                         // Aguarda 3 segundos para disparar automaticamente o Auto-Fix conforme solicitado
+                         setTimeout(handleAutoFix, 3000);
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -153,7 +153,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     try {
         const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
         
-        // Extrair apenas as partes mais relevantes dos logs para não estourar contexto
+        // Extrair partes relevantes
         const lines = realLogs.split('\n');
         const errorStartIndex = lines.findIndex(l => l.includes('[ERROR]') || l.includes('Compilation failure') || l.includes('Could not resolve dependencies'));
         let relevantLogs = realLogs;
@@ -161,7 +161,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
             relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5), errorStartIndex + 50).join('\n');
         }
         
-        // Se ainda for muito grande, corta para manter dentro do limite da janela de contexto
+        // Limita tamanho
         if (relevantLogs.length > 7000) {
             relevantLogs = relevantLogs.substring(0, 7000);
         }
@@ -169,11 +169,11 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         isFixingInProgressRef.current = true;
         setFixCount(prev => prev + 1);
         
-        // Dispara o trigger para o ChatInterface que iniciará a correção automaticamente
+        // Trigger automático para o ChatInterface
         onTriggerAutoFix(relevantLogs);
-        setBuildLogs(prev => prev + `> 🔧 Auto-Fix acionado automaticamente. Verifique o chat para detalhes.\n`);
+        setBuildLogs(prev => prev + `> 🔧 Reparo automático iniciado no chat. Analisando arquivos...\n`);
     } catch (e: any) {
-        setBuildLogs(prev => prev + `> ⚠️ Falha ao ler logs: ${e.message}\n`);
+        setBuildLogs(prev => prev + `> ⚠️ Falha crítica ao ler logs: ${e.message}\n`);
         isFixingInProgressRef.current = false;
     }
   };
@@ -200,7 +200,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                 {settings.name}
                 {isFixingInProgressRef.current && (
                   <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/50 text-orange-400 text-[10px] animate-pulse">
-                    <Zap className="w-2.5 h-2.5" /> AUTO-FIXING EM CURSO
+                    <Zap className="w-2.5 h-2.5" /> AUTO-FIXING ATIVO
                   </span>
                 )}
             </h3>
@@ -304,7 +304,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      </div>
                    </div>
                 )}
-                {buildStatus === 'failure' && <span className="text-red-500 font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> FALHA DETECTADA</span>}
+                {buildStatus === 'failure' && <span className="text-red-500 font-bold flex items-center gap-1 animate-pulse"><AlertCircle className="w-3 h-3" /> FALHA CRÍTICA</span>}
               </div>
               <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white transition-colors"><ChevronDown className="w-5 h-5" /></button>
             </div>
