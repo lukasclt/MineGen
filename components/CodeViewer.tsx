@@ -1,9 +1,12 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, RefreshCw, PlayCircle, Loader2, UploadCloud, ChevronDown } from 'lucide-react';
+// Renamed Infinity icon to InfinityIcon to avoid collision with global Infinity number used in Framer Motion transitions
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, RefreshCw, PlayCircle, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon, Sparkles, BrainCircuit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JSZip from 'jszip';
-import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact } from '../services/githubService';
+import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact, getWorkflowRunLogs } from '../services/githubService';
+import { fixPluginCode } from '../services/geminiService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
 
 interface CodeViewerProps {
@@ -17,27 +20,28 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [copied, setCopied] = useState(false);
   
   const [isCommitting, setIsCommitting] = useState(false);
+  const [isFixing, setIsFixing] = useState(false);
+  const [autoFixEterno, setAutoFixEterno] = useState(false);
+  const [fixCount, setFixCount] = useState(0);
+  
   const [buildStatus, setBuildStatus] = useState<'idle' | 'queued' | 'in_progress' | 'success' | 'failure'>('idle');
   const [buildLogs, setBuildLogs] = useState<string>("");
   const [showConsole, setShowConsole] = useState(false);
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   const [buildProgress, setBuildProgress] = useState(0);
+  const [lastRunId, setLastRunId] = useState<number | null>(null);
   
   const buildInProgressRef = useRef(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
-  // Encontrar o arquivo atual baseado no path selecionado
   const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
 
   useEffect(() => {
     if (project && project.files.length > 0) {
-      // Se nada estiver selecionado ou o arquivo atual não existir mais, seleciona o principal
       if (!selectedFilePath || !project.files.some(f => f.path === selectedFilePath)) {
           const mainFile = project.files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || project.files[0];
           setSelectedFilePath(mainFile.path);
       }
-    } else {
-      setSelectedFilePath(null);
     }
   }, [project]);
 
@@ -58,10 +62,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   };
 
   const handleCommitAndPush = async (silent = false) => {
-    if (!settings.github?.isConnected || !project || buildInProgressRef.current) {
-        if (!silent && !settings.github?.isConnected) alert("GitHub não conectado.");
-        return;
-    }
+    if (!settings.github?.isConnected || !project || buildInProgressRef.current) return;
     
     buildInProgressRef.current = true;
     const workflowPath = ".github/workflows/build.yml";
@@ -77,12 +78,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     setIsCommitting(true);
     setBuildProgress(0);
     if (!silent) setShowConsole(true);
-    setBuildLogs(prev => prev + `\n> Enviando código para GitHub (Java ${settings.javaVersion})...\n`);
+    setBuildLogs(prev => prev + `\n> 🚀 Iniciando Push de código...\n`);
     setBuildStatus('queued');
 
     try {
-        await commitAndPushFiles(settings.github!, filesToPush, `Build trigger`);
-        setBuildLogs(prev => prev + `> Arquivos enviados. Iniciando build no Maven Cloud...\n`);
+        await commitAndPushFiles(settings.github!, filesToPush, `Build #${fixCount + 1}`);
+        setBuildLogs(prev => prev + `> Arquivos no GitHub. Aguardando Runner...\n`);
         pollBuildStatus();
     } catch (e: any) {
         setBuildLogs(prev => prev + `> 🛑 ERRO no Push: ${e.message}\n`);
@@ -100,48 +101,79 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       
       const pollInterval = setInterval(async () => {
           attempts++;
-          if (progressSim < 95) {
-              progressSim += 1 + (Math.random() * 2);
-              setBuildProgress(Math.min(99, Math.round(progressSim)));
+          if (progressSim < 90) {
+              progressSim += 1.5;
+              setBuildProgress(Math.round(progressSim));
           }
 
           try {
              const run = await getLatestWorkflowRun(settings.github!);
              if (run) {
+                 setLastRunId(run.id);
                  if (run.status === 'completed') {
                      clearInterval(pollInterval);
                      setBuildProgress(100);
-                     setBuildLogs(prev => prev + `> Build concluído: ${run.conclusion.toUpperCase()}\n`);
                      buildInProgressRef.current = false;
                      
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
-                         setBuildLogs(prev => prev + `> ✅ SUCESSO! JAR gerado e pronto.\n`);
+                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Build concluído!\n`);
+                         setFixCount(0); // Reset count on success
                          const url = await getBuildArtifact(settings.github!, run.id);
                          if (url) setArtifactUrl(url);
                      } else {
                          setBuildStatus('failure');
-                         setBuildLogs(prev => prev + `> ❌ Falha detectada no Maven.\n`);
+                         setBuildLogs(prev => prev + `> ❌ FALHA: Erro detectado no Maven.\n`);
+                         if (autoFixEterno && fixCount < 3) {
+                             handleAutoFix();
+                         }
                      }
                  } else {
                      setBuildStatus('in_progress');
-                     if (attempts % 3 === 0) setBuildLogs(prev => prev + `> Compilando... [${Math.round(progressSim)}%]\n`);
                  }
              }
           } catch (e) { console.error(e); }
 
-          if (attempts > 180) {
+          if (attempts > 120) {
               clearInterval(pollInterval);
-              setBuildLogs(prev => prev + `> 🛑 Timeout no build.\n`);
+              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: O build demorou demais.\n`);
               buildInProgressRef.current = false;
           }
-      }, 3000);
+      }, 4000);
   };
 
-  const handleDownloadArtifact = async () => {
-      if (!artifactUrl || !settings.github) return;
-      try { await downloadArtifact(settings.github.token, artifactUrl, `${settings.name}-build.zip`); }
-      catch (e: any) { alert("Erro ao baixar: " + e.message); }
+  const handleAutoFix = async () => {
+    if (!project || !lastRunId || !settings.github || isFixing) return;
+    
+    setIsFixing(true);
+    setShowConsole(true);
+    setBuildLogs(prev => prev + `> 🧠 Auto-Fix: Analisando logs reais do GitHub...\n`);
+
+    try {
+        const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
+        // Filtrar apenas partes interessantes do log para economizar tokens
+        const errorLogs = realLogs.split('\n').filter(line => line.includes('[ERROR]') || line.includes('Compilation failure')).join('\n');
+        
+        const fixedProject = await fixPluginCode(project, errorLogs || realLogs.substring(realLogs.length - 5000), settings);
+        
+        if (onProjectUpdate) onProjectUpdate(fixedProject);
+        
+        setBuildLogs(prev => prev + `> ✨ Auto-Fix: Código corrigido pela IA!\n`);
+        setFixCount(prev => prev + 1);
+
+        if (autoFixEterno) {
+            setBuildLogs(prev => prev + `> 🔄 Auto-Fix Eterno: Re-enviando para novo build...\n`);
+            // Pequeno delay para garantir que o estado do React atualizou os arquivos
+            setTimeout(() => {
+                buildInProgressRef.current = false;
+                handleCommitAndPush(true);
+            }, 2000);
+        }
+    } catch (e: any) {
+        setBuildLogs(prev => prev + `> ⚠️ Falha no Auto-Fix: ${e.message}\n`);
+    } finally {
+        setIsFixing(false);
+    }
   };
 
   const handleDownloadSource = async () => {
@@ -152,126 +184,149 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${settings.name}-maven-source.zip`;
-    document.body.appendChild(a);
+    a.download = `${settings.name}-src.zip`;
     a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   };
 
-  if (!project) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 h-full p-8 text-center border-l border-gray-800"><FileCode className="w-16 h-16 mb-4 opacity-20" /><p className="text-lg font-medium">Nenhum Código Gerado</p></div>;
+  if (!project) return <div className="flex-1 flex flex-col items-center justify-center text-gray-500 h-full p-8 text-center border-l border-gray-800"><FileCode className="w-16 h-16 mb-4 opacity-20" /><p className="text-lg font-medium">Crie um plugin para ver o código</p></div>;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#1e1e1e]/95 backdrop-blur-sm border-l border-gray-800 overflow-hidden relative">
-        <div className="h-12 border-b border-gray-700 flex items-center justify-between px-4 bg-[#252526]/90 shrink-0">
+    <div className="flex-1 flex flex-col h-full bg-[#1e1e1e] border-l border-gray-800 overflow-hidden relative">
+        <div className="h-12 border-b border-gray-700 flex items-center justify-between px-4 bg-[#252526] shrink-0">
             <h3 className="text-sm font-medium text-white flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-mc-accent" />
-                {settings.name} <span className="text-gray-500 text-xs">({settings.version})</span>
+                {settings.name}
             </h3>
             
             <div className="flex items-center gap-2">
-                 <div className="flex items-center bg-black/30 rounded-lg p-0.5 border border-gray-700 mr-2">
-                    <button onClick={() => handleCommitAndPush()} disabled={isCommitting || !settings.github?.isConnected} className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 cursor-not-allowed text-gray-500' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}>
+                 <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-gray-700 mr-2">
+                    <button 
+                      onClick={() => handleCommitAndPush()} 
+                      disabled={isCommitting || isFixing || !settings.github?.isConnected} 
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-gray-300 hover:bg-gray-700'}`}
+                    >
                         {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
-                        <span className="hidden xl:inline">Commit & Push</span>
+                        <span>Push</span>
                     </button>
+                    
                     <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
-                    {buildStatus === 'success' && artifactUrl ? (
-                         <button onClick={handleDownloadArtifact} className="text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold bg-green-500/20 text-green-300 hover:bg-green-500/30 animate-pulse">
-                            <Download className="w-3 h-3" /> <span>Download JAR</span>
-                         </button>
-                    ) : (
-                         <button onClick={() => { setShowConsole(true); handleCommitAndPush(); }} disabled={!settings.github?.isConnected} className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'in_progress' || buildStatus === 'queued' ? 'text-yellow-400' : buildStatus === 'failure' ? 'text-red-400' : 'text-gray-300 hover:bg-gray-700'}`}>
-                            {buildStatus === 'in_progress' || buildStatus === 'queued' ? <RefreshCw className="w-3 h-3 animate-spin"/> : <PlayCircle className="w-3 h-3" />}
-                            <span className="hidden xl:inline">{buildStatus === 'in_progress' || buildStatus === 'queued' ? `Compilando (${buildProgress}%)` : 'Build Maven'}</span>
-                         </button>
-                    )}
-                    <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
-                    <button onClick={() => setShowConsole(!showConsole)} className={`p-1.5 rounded-md transition-colors ${showConsole ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}`}>
-                      <Terminal className="w-3 h-3" />
+                    
+                    <button 
+                      onClick={() => setAutoFixEterno(!autoFixEterno)} 
+                      className={`text-xs px-2 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10' : 'text-gray-500 hover:text-gray-300'}`}
+                      title="Auto-Fix Eterno: Tenta corrigir e buildar sozinho até funcionar"
+                    >
+                        {/* Using the renamed InfinityIcon component to avoid shadowing the global Infinity number used in transitions */}
+                        <InfinityIcon className={`w-3 h-3 ${autoFixEterno ? 'animate-pulse' : ''}`} />
+                        <span className="hidden lg:inline">Eterno</span>
                     </button>
                  </div>
+
+                {buildStatus === 'failure' && !isFixing && (
+                    <button 
+                      onClick={handleAutoFix}
+                      className="text-xs bg-red-600 hover:bg-red-500 text-white font-bold px-3 py-1.5 rounded flex items-center gap-2 animate-bounce shadow-lg shadow-red-900/20"
+                    >
+                        <Wrench className="w-3 h-3" /> Auto-Fix
+                    </button>
+                )}
+
                 <button onClick={handleDownloadSource} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold px-3 py-1.5 rounded flex items-center gap-2 transition-colors">
-                    <Download className="w-3 h-3" /> <span className="hidden md:inline">Fonte</span>
+                    <Download className="w-3 h-3" /> Fonte
                 </button>
             </div>
         </div>
 
-      <div className="flex-1 flex overflow-hidden relative z-0">
-        <div className="w-60 bg-[#252526]/80 border-r border-gray-700 overflow-y-auto flex-shrink-0 custom-scrollbar">
+      <div className="flex-1 flex overflow-hidden relative">
+        <div className="w-56 bg-[#252526]/50 border-r border-gray-700 overflow-y-auto shrink-0 custom-scrollbar">
           <div className="py-2">
             {project?.files.map((file, index) => {
                const fileName = file.path.split('/').pop();
                const isSelected = selectedFilePath === file.path;
-               let iconColor = 'text-gray-400';
-               if (fileName?.endsWith('.java')) iconColor = 'text-orange-400';
-               else if (fileName?.endsWith('.xml')) iconColor = 'text-blue-400';
                return (
                 <motion.button 
                   key={file.path} 
-                  initial={{ x: -10, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.03 }}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.02 }}
                   onClick={() => setSelectedFilePath(file.path)} 
-                  className={`w-full text-left px-4 py-1.5 text-sm flex items-center gap-2 truncate hover:bg-[#2a2d2e] transition-colors ${isSelected ? 'bg-[#37373d] text-white border-l-2 border-mc-accent' : 'text-gray-400 border-l-2 border-transparent'}`}
+                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 truncate ${isSelected ? 'bg-[#37373d] text-white border-l-2 border-mc-accent' : 'text-gray-400 border-l-2 border-transparent hover:bg-white/5'}`}
                 >
-                    <FileCode className={`w-4 h-4 ${iconColor}`} />
+                    <FileCode className={`w-3.5 h-3.5 ${file.language === 'java' ? 'text-orange-400' : 'text-blue-400'}`} />
                     <span className="truncate">{fileName}</span>
                 </motion.button>
                )
             })}
           </div>
         </div>
-        <div className="flex-1 flex flex-col min-w-0 bg-transparent relative">
+        
+        <div className="flex-1 flex flex-col min-w-0 bg-black/20">
             <AnimatePresence mode="wait">
               {selectedFile ? (
                   <motion.div 
-                    key={selectedFile.path + "-" + selectedFile.content.length} // Força re-trigger se mudar
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2 }}
+                    key={selectedFile.path + "-" + selectedFile.content.length}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
                     className="flex-1 flex flex-col h-full"
                   >
-                      <div className="h-9 flex items-center justify-between px-4 bg-[#1e1e1e]/50 border-b border-gray-800 shrink-0">
-                          <span className="text-xs text-gray-400 font-mono">{selectedFile.path}</span>
-                          <button onClick={handleCopy} className="text-gray-400 hover:text-white transition-colors">
-                            {copied ? <Check className="w-4 h-4 text-mc-green" /> : <Copy className="w-4 h-4" />}
+                      <div className="h-8 flex items-center justify-between px-4 bg-black/20 border-b border-gray-800 shrink-0">
+                          <span className="text-[10px] text-gray-500 font-mono">{selectedFile.path}</span>
+                          <button onClick={handleCopy} className="text-gray-500 hover:text-white transition-colors">
+                            {copied ? <Check className="w-3 h-3 text-mc-green" /> : <Copy className="w-3 h-3" />}
                           </button>
                       </div>
-                      <div className="flex-1 overflow-auto p-4 custom-scrollbar bg-black/10">
-                          <pre className="font-mono text-sm text-gray-300 leading-relaxed whitespace-pre select-text">
-                            <code>{selectedFile.content}</code>
-                          </pre>
+                      <div className="flex-1 overflow-auto p-4 custom-scrollbar font-mono text-sm leading-relaxed text-gray-300">
+                          <pre className="whitespace-pre select-text"><code>{selectedFile.content}</code></pre>
                       </div>
                   </motion.div>
               ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500">Selecione um arquivo</div>
+                  <div className="flex items-center justify-center h-full text-gray-600 text-xs italic">Selecione um arquivo para visualizar</div>
               )}
             </AnimatePresence>
         </div>
+
+        {isFixing && (
+            <div className="absolute inset-0 z-50 bg-mc-dark/80 backdrop-blur-sm flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="relative">
+                        <BrainCircuit className="w-16 h-16 text-mc-accent animate-pulse" />
+                        <Sparkles className="w-6 h-6 text-mc-gold absolute -top-1 -right-1 animate-bounce" />
+                    </div>
+                    <div>
+                        <h4 className="text-lg font-bold text-white">IA Corrigindo Erros...</h4>
+                        <p className="text-sm text-gray-400 max-w-xs">Analisando logs do GitHub e reescrevendo código logicamente.</p>
+                    </div>
+                    <div className="w-48 h-1 bg-gray-700 rounded-full overflow-hidden">
+                        <motion.div 
+                          className="h-full bg-mc-accent"
+                          animate={{ x: [-200, 200] }}
+                          transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }}
+                        />
+                    </div>
+                </div>
+            </div>
+        )}
       </div>
 
       <AnimatePresence>
         {showConsole && (
           <motion.div 
-            initial={{ y: 300 }}
-            animate={{ y: 0 }}
-            exit={{ y: 300 }}
-            className={`absolute bottom-0 left-0 right-0 z-20 border-t border-gray-700 bg-gray-950/95 backdrop-blur-md flex flex-col shadow-2xl h-72`}
+            initial={{ height: 0 }}
+            animate={{ height: 240 }}
+            exit={{ height: 0 }}
+            className="border-t border-gray-700 bg-[#0f0f0f] flex flex-col shadow-2xl z-20"
           >
-            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/90 border-b border-gray-700 h-10 shrink-0">
-              <div className="flex items-center gap-3 text-xs font-mono">
-                <Terminal className="w-3 h-3 text-gray-400" />
-                <span className="text-gray-300">Terminal: Maven Logs</span>
-                {(buildStatus === 'in_progress' || buildStatus === 'queued') && <span className="text-yellow-400 font-bold ml-2">Progress: {buildProgress}%</span>}
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/50 border-b border-gray-800 h-9 shrink-0">
+              <div className="flex items-center gap-3 text-[10px] font-mono text-gray-400 uppercase tracking-widest">
+                <Terminal className="w-3 h-3" />
+                <span>Console Maven</span>
+                {buildStatus === 'in_progress' && <span className="text-mc-accent animate-pulse">Building {buildProgress}%</span>}
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
-              </div>
+              <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-300 custom-scrollbar bg-black/40">
-              <pre className="whitespace-pre-wrap">{buildLogs || "> Pronto para build Maven..."}</pre>
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-400 custom-scrollbar leading-tight bg-black/40">
+              <pre className="whitespace-pre-wrap">{buildLogs || "> Aguardando comando de build..."}</pre>
               <div ref={consoleEndRef} />
             </div>
           </motion.div>
