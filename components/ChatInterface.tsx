@@ -4,7 +4,7 @@ import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
 import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode } from '../services/geminiService';
-import { getDirectoryHandle, saveProjectToDisk } from '../services/fileSystem';
+import { getDirectoryHandle, saveProjectToDisk, verifyPermission } from '../services/fileSystem';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
@@ -76,7 +76,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       onSetDirectoryHandle(handle);
       return handle;
     } catch (error: any) {
-      alert("É necessário selecionar uma pasta para continuar.\n" + error.message);
+      // User cancelled or error
+      if (error.name !== 'AbortError') {
+         alert("Erro ao selecionar pasta: " + error.message);
+      }
       return null;
     }
   };
@@ -84,16 +87,35 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string) => {
     if (!text.trim() || isLoading) return;
 
-    // MANDATORY FOLDER SELECTION LOGIC
     let currentHandle = directoryHandle;
+
+    // 1. Mandatory Folder Selection
     if (!currentHandle) {
-       const confirmSelect = window.confirm("MineGen AI precisa de uma pasta local para salvar o plugin automaticamente.\nDeseja selecionar a pasta agora?");
+       // Since this is triggered by a click, we can call this directly.
+       // However, to ensure clarity, let's ask confirm, or just rely on the fact user clicked "Send".
+       // The prompt says "mandatory to select folder".
+       const confirmSelect = window.confirm("Você precisa selecionar uma pasta local para onde o plugin será gerado/salvo.\n\nClique em OK para selecionar a pasta.");
        if (!confirmSelect) return;
        
        currentHandle = await handleSelectFolder();
-       if (!currentHandle) return; // User cancelled or error
+       if (!currentHandle) return; // Cancelled
     }
 
+    // 2. CRITICAL: Verify/Request Write Permissions NOW (while we have User Activation)
+    // If we wait until after generatePluginCode (which takes seconds), the activation expires
+    // and the browser will block the permission prompt/file access.
+    try {
+      const hasPermission = await verifyPermission(currentHandle, true);
+      if (!hasPermission) {
+        alert("Permissão de escrita negada. O MineGen precisa de permissão para salvar os arquivos.");
+        return;
+      }
+    } catch (e: any) {
+      alert("Erro ao verificar permissões: " + e.message);
+      return;
+    }
+
+    // 3. Start AI Processing
     const userMessage: ChatMessage = { 
       role: 'user', 
       text: text 
@@ -114,7 +136,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }, 400);
 
     try {
-      // 1. Generate Code
+      // AI Generation (Time consuming)
       const project = await generatePluginCode(text, settings, currentProject);
       
       clearInterval(progressInterval);
@@ -122,8 +144,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setLoadingText('Salvando arquivos no disco...');
       setIsSaving(true);
 
-      // 2. Auto-Save to Disk
+      // 4. Save to Disk
+      // Because we verified permission in step 2, the handle is ready to write without new prompts.
       await saveProjectToDisk(currentHandle, project);
+      
       setIsSaving(false);
       setProgress(100);
 
@@ -193,7 +217,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {msg.projectData && (
                   <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center justify-between text-[11px]">
                     <div className="text-mc-green font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Projeto Gerado & Salvo
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Salvo em: {directoryHandle?.name || 'Disco'}
                     </div>
                   </div>
                 )}
@@ -264,7 +288,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             type="text" 
             value={input} 
             onChange={(e) => setInput(e.target.value)} 
-            placeholder={directoryHandle ? (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...") : "Digite para selecionar a pasta de destino..."} 
+            placeholder={directoryHandle ? (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...") : "Digite para Selecionar a Pasta de Destino..."} 
             className={`w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border ${!directoryHandle ? 'border-mc-gold/50 shadow-[0_0_15px_rgba(255,170,0,0.1)]' : 'border-gray-600'} rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500`} 
             disabled={isLoading} 
           />

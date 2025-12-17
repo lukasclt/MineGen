@@ -5,18 +5,23 @@ export const getDirectoryHandle = async () => {
   if (!('showDirectoryPicker' in window)) {
     throw new Error("Seu navegador não suporta acesso direto a pastas. Use Chrome, Edge ou Opera.");
   }
-  // @ts-ignore - Typescript pode não reconhecer showDirectoryPicker nativamente sem config
+  // @ts-ignore
   return await window.showDirectoryPicker();
 };
 
 export const verifyPermission = async (fileHandle: any, readWrite: boolean = true) => {
   const options = { mode: readWrite ? 'readwrite' : 'read' };
+  
+  // Check if permission is already granted
   if ((await fileHandle.queryPermission(options)) === 'granted') {
     return true;
   }
+  
+  // Request permission. This MUST be called inside a user gesture (click handler)
   if ((await fileHandle.requestPermission(options)) === 'granted') {
     return true;
   }
+  
   return false;
 };
 
@@ -30,13 +35,13 @@ export const saveProjectToDisk = async (directoryHandle: any, project: Generated
 
     let currentDirHandle = directoryHandle;
 
-    // Navegar ou criar diretórios recursivamente (ex: src -> main -> java)
+    // Navigate or create directories recursively
     for (const dir of directories) {
       if (dir === '.' || dir === '') continue;
       currentDirHandle = await currentDirHandle.getDirectoryHandle(dir, { create: true });
     }
 
-    // Criar e escrever no arquivo
+    // Create and write file
     if (fileName) {
       const fileHandle = await currentDirHandle.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
