@@ -25,14 +25,25 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [buildStatus, setBuildStatus] = useState<'idle' | 'queued' | 'in_progress' | 'success' | 'failure'>('idle');
   const [buildLogs, setBuildLogs] = useState<string>("");
   const [showConsole, setShowConsole] = useState(false);
-  const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   const [buildProgress, setBuildProgress] = useState(0);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
   
   const buildInProgressRef = useRef(false);
+  const isWaitingForFixRef = useRef(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
+
+  // Monitora mudanças no projeto para o ciclo Eterno
+  useEffect(() => {
+    if (isWaitingForFixRef.current && project) {
+      console.log("Detectado projeto corrigido. Reiniciando Build (Modo Eterno)...");
+      isWaitingForFixRef.current = false;
+      if (autoFixEterno) {
+        setTimeout(() => handleCommitAndPush(true), 1500);
+      }
+    }
+  }, [project, autoFixEterno]);
 
   useEffect(() => {
     if (project && project.files.length > 0) {
@@ -71,12 +82,10 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     if (workflowIndex >= 0) filesToPush[workflowIndex] = { ...filesToPush[workflowIndex], content: workflowContent };
     else filesToPush.push({ path: workflowPath, content: workflowContent, language: 'yaml' });
 
-    if (onProjectUpdate) onProjectUpdate({ ...project, files: filesToPush });
-
     setIsCommitting(true);
     setBuildProgress(0);
     if (!silent) setShowConsole(true);
-    setBuildLogs(prev => prev + `\n> 🚀 Iniciando Push de código...\n`);
+    setBuildLogs(prev => prev + `\n> 🚀 [Build #${fixCount + 1}] Iniciando Push...\n`);
     setBuildStatus('queued');
 
     try {
@@ -115,15 +124,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
-                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Build concluído!\n`);
+                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Plugin compilado e pronto!\n`);
                          setFixCount(0);
-                         const url = await getBuildArtifact(settings.github!, run.id);
-                         if (url) setArtifactUrl(url);
                      } else {
                          setBuildStatus('failure');
-                         setBuildLogs(prev => prev + `> ❌ FALHA: Erro detectado no Maven.\n`);
-                         if (autoFixEterno && fixCount < 3) {
-                             handleAutoFix();
+                         setBuildLogs(prev => prev + `> ❌ FALHA no Maven detectada.\n`);
+                         
+                         // Se o modo eterno estiver ON, dispara o Auto-Fix sozinho
+                         if (autoFixEterno) {
+                            setBuildLogs(prev => prev + `> 🔄 [Modo Eterno] Solicitando correção automática...\n`);
+                            handleAutoFix();
                          }
                      }
                  } else {
@@ -132,9 +142,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
              }
           } catch (e) { console.error(e); }
 
-          if (attempts > 120) {
+          if (attempts > 150) {
               clearInterval(pollInterval);
-              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: O build demorou demais.\n`);
+              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: O build demorou mais de 10 minutos.\n`);
               buildInProgressRef.current = false;
           }
       }, 4000);
@@ -147,10 +157,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
         const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
         const errorLogs = realLogs.split('\n').filter(line => line.includes('[ERROR]') || line.includes('Compilation failure')).join('\n');
         
+        isWaitingForFixRef.current = true; // Marca que estamos esperando o Chat devolver o projeto
         onTriggerAutoFix(errorLogs || realLogs.substring(realLogs.length - 2000));
         setFixCount(prev => prev + 1);
     } catch (e: any) {
         setBuildLogs(prev => prev + `> ⚠️ Falha ao buscar logs: ${e.message}\n`);
+        isWaitingForFixRef.current = false;
     }
   };
 
@@ -181,7 +193,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     <button 
                       onClick={() => handleCommitAndPush()} 
                       disabled={isCommitting || !settings.github?.isConnected} 
-                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-gray-300 hover:bg-gray-700'}`}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-mc-accent hover:bg-mc-accent/10'}`}
                     >
                         {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
                         <span>Push</span>
@@ -204,7 +216,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     <button 
                       onClick={() => setAutoFixEterno(!autoFixEterno)} 
                       className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10' : 'text-gray-500 hover:text-gray-300'}`}
-                      title="Auto-Fix Eterno: Tenta corrigir e buildar sozinho até funcionar"
+                      title="Auto-Fix Eterno: Ciclo infinito de Fix -> Push até funcionar"
                     >
                         <InfinityIcon className={`w-3 h-3 ${autoFixEterno ? 'animate-pulse' : ''}`} />
                         <span className="hidden lg:inline">Eterno</span>
