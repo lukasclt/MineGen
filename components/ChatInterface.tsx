@@ -1,7 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-// Added Wrench to the lucide-react imports
 import { Send, Bot, User, Cpu, Sparkles, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, Wrench } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode, fixPluginCode } from '../services/geminiService';
@@ -93,7 +92,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     const userMessage: ChatMessage = { 
       role: 'user', 
-      text: isFix ? "🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção..." : text 
+      text: isFix ? "🔧 **Auto-Fix Obrigatório**\nErro de compilação detectado. Reparando projeto..." : text 
     };
     
     setMessages([...messages, userMessage]);
@@ -120,7 +119,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       
       clearInterval(progressInterval);
       setProgress(100);
-      setLoadingText('Gerando arquivos...');
+      setLoadingText('Finalizando...');
       await new Promise(resolve => setTimeout(resolve, 800));
       
       const aiMessage: ChatMessage = {

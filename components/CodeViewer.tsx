@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, RefreshCw, PlayCircle, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon, Sparkles, BrainCircuit } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JSZip from 'jszip';
-import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact, getWorkflowRunLogs } from '../services/githubService';
+import { commitAndPushFiles, getLatestWorkflowRun, getWorkflowRunLogs } from '../services/githubService';
 import { GITHUB_ACTION_TEMPLATE } from '../constants';
 
 interface CodeViewerProps {
@@ -29,21 +29,21 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [lastRunId, setLastRunId] = useState<number | null>(null);
   
   const buildInProgressRef = useRef(false);
-  const isWaitingForFixRef = useRef(false);
+  const isFixingInProgressRef = useRef(false);
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
   const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
 
-  // Monitora mudanças no projeto para o ciclo Eterno
+  // Ciclo Eterno: Se o projeto mudar após um fix e o Eterno estiver ligado, faz Push automático
   useEffect(() => {
-    if (isWaitingForFixRef.current && project) {
-      console.log("Detectado projeto corrigido. Reiniciando Build (Modo Eterno)...");
-      isWaitingForFixRef.current = false;
+    if (isFixingInProgressRef.current && project) {
+      isFixingInProgressRef.current = false;
       if (autoFixEterno) {
+        console.log("Ciclo Eterno: Reiniciando build após correção...");
         setTimeout(() => handleCommitAndPush(true), 1500);
       }
     }
-  }, [project, autoFixEterno]);
+  }, [project]);
 
   useEffect(() => {
     if (project && project.files.length > 0) {
@@ -85,12 +85,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     setIsCommitting(true);
     setBuildProgress(0);
     if (!silent) setShowConsole(true);
-    setBuildLogs(prev => prev + `\n> 🚀 [Build #${fixCount + 1}] Iniciando Push...\n`);
+    setBuildLogs(prev => prev + `\n> 🚀 [BUILD #${fixCount + 1}] Iniciando build...\n`);
     setBuildStatus('queued');
 
     try {
-        await commitAndPushFiles(settings.github!, filesToPush, `Build #${fixCount + 1}`);
-        setBuildLogs(prev => prev + `> Arquivos no GitHub. Aguardando Runner...\n`);
+        await commitAndPushFiles(settings.github!, filesToPush, `Build Ciclo #${fixCount + 1}`);
+        setBuildLogs(prev => prev + `> Arquivos enviados. Aguardando processamento do Runner...\n`);
         pollBuildStatus();
     } catch (e: any) {
         setBuildLogs(prev => prev + `> 🛑 ERRO no Push: ${e.message}\n`);
@@ -124,17 +124,13 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
-                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Plugin compilado e pronto!\n`);
+                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Build concluído!\n`);
                          setFixCount(0);
+                         isFixingInProgressRef.current = false;
                      } else {
                          setBuildStatus('failure');
-                         setBuildLogs(prev => prev + `> ❌ FALHA no Maven detectada.\n`);
-                         
-                         // Se o modo eterno estiver ON, dispara o Auto-Fix sozinho
-                         if (autoFixEterno) {
-                            setBuildLogs(prev => prev + `> 🔄 [Modo Eterno] Solicitando correção automática...\n`);
-                            handleAutoFix();
-                         }
+                         setBuildLogs(prev => prev + `> ❌ FALHA: O build falhou. Iniciando Auto-Fix...\n`);
+                         handleAutoFix();
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -142,12 +138,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
              }
           } catch (e) { console.error(e); }
 
-          if (attempts > 150) {
+          if (attempts > 120) {
               clearInterval(pollInterval);
-              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: O build demorou mais de 10 minutos.\n`);
+              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: Runner demorou demais.\n`);
               buildInProgressRef.current = false;
           }
-      }, 4000);
+      }, 5000);
   };
 
   const handleAutoFix = async () => {
@@ -155,14 +151,15 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     
     try {
         const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
-        const errorLogs = realLogs.split('\n').filter(line => line.includes('[ERROR]') || line.includes('Compilation failure')).join('\n');
+        const errorLines = realLogs.split('\n').filter(line => line.includes('[ERROR]') || line.includes('Compilation failure'));
+        const contextLogs = errorLines.length > 0 ? errorLines.join('\n') : realLogs.substring(Math.max(0, realLogs.length - 3000));
         
-        isWaitingForFixRef.current = true; // Marca que estamos esperando o Chat devolver o projeto
-        onTriggerAutoFix(errorLogs || realLogs.substring(realLogs.length - 2000));
+        isFixingInProgressRef.current = true;
         setFixCount(prev => prev + 1);
+        onTriggerAutoFix(contextLogs);
     } catch (e: any) {
-        setBuildLogs(prev => prev + `> ⚠️ Falha ao buscar logs: ${e.message}\n`);
-        isWaitingForFixRef.current = false;
+        setBuildLogs(prev => prev + `> ⚠️ Falha ao ler logs: ${e.message}\n`);
+        isFixingInProgressRef.current = false;
     }
   };
 
@@ -193,33 +190,21 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     <button 
                       onClick={() => handleCommitAndPush()} 
                       disabled={isCommitting || !settings.github?.isConnected} 
-                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-mc-accent hover:bg-mc-accent/10'}`}
+                      className={`text-xs px-4 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-mc-accent hover:bg-mc-accent/10'}`}
                     >
                         {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
-                        <span>Push</span>
+                        <span>Push {fixCount > 0 ? `(${fixCount})` : ''}</span>
                     </button>
                     
-                    <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
-
-                    <button 
-                      onClick={handleAutoFix}
-                      disabled={buildStatus !== 'failure'}
-                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${buildStatus === 'failure' ? 'text-red-400 bg-red-500/10 hover:bg-red-500/20 animate-pulse ring-1 ring-red-500/30' : 'text-gray-600 opacity-50 cursor-not-allowed'}`}
-                      title="Auto-Fix: Corrigir erros de build via IA (Chat)"
-                    >
-                        <Wrench className="w-3 h-3" />
-                        <span className="hidden lg:inline">Fix</span>
-                    </button>
-
                     <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
                     
                     <button 
                       onClick={() => setAutoFixEterno(!autoFixEterno)} 
                       className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10' : 'text-gray-500 hover:text-gray-300'}`}
-                      title="Auto-Fix Eterno: Ciclo infinito de Fix -> Push até funcionar"
+                      title="Auto-Fix Eterno: Ciclo infinito de correção e build"
                     >
                         <InfinityIcon className={`w-3 h-3 ${autoFixEterno ? 'animate-pulse' : ''}`} />
-                        <span className="hidden lg:inline">Eterno</span>
+                        <span className="hidden lg:inline">{autoFixEterno ? 'Eterno: ON' : 'Modo Eterno'}</span>
                     </button>
                  </div>
 
@@ -273,7 +258,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                       </div>
                   </motion.div>
               ) : (
-                  <div className="flex items-center justify-center h-full text-gray-600 text-xs italic">Selecione um arquivo para visualizar</div>
+                  <div className="flex items-center justify-center h-full text-gray-600 text-xs italic">Selecione um arquivo</div>
               )}
             </AnimatePresence>
         </div>
@@ -292,11 +277,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                 <Terminal className="w-3 h-3" />
                 <span>Console Maven</span>
                 {buildStatus === 'in_progress' && <span className="text-mc-accent animate-pulse">Building {buildProgress}%</span>}
+                {isFixingInProgressRef.current && <span className="text-red-400 animate-pulse">Auto-Fixing...</span>}
               </div>
               <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-400 custom-scrollbar leading-tight bg-black/40">
-              <pre className="whitespace-pre-wrap">{buildLogs || "> Aguardando comando de build..."}</pre>
+              <pre className="whitespace-pre-wrap">{buildLogs || "> Aguardando build..."}</pre>
               <div ref={consoleEndRef} />
             </div>
           </motion.div>
