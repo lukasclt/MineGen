@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github, UploadCloud, PlayCircle, Loader2, ArrowUpCircle } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, XCircle, CheckCircle2, RefreshCw, Hammer, Bug, ChevronDown, ChevronUp, Cloud, Github, UploadCloud, PlayCircle, Loader2, ArrowUpCircle, Sparkles, Wand2 } from 'lucide-react';
 import JSZip from 'jszip';
 import { simulateGradleBuild, fixPluginCode } from '../services/geminiService';
 import { commitAndPushFiles, getLatestWorkflowRun, getBuildArtifact, downloadArtifact } from '../services/githubService';
@@ -23,8 +23,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
   const [showConsole, setShowConsole] = useState(false);
   const [artifactUrl, setArtifactUrl] = useState<string | null>(null);
   
-  // Local Simulation State (fallback)
-  const [isSimulating, setIsSimulating] = useState(false);
+  // Auto Fix State
+  const [isFixing, setIsFixing] = useState(false);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
 
@@ -90,16 +90,17 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     setIsCommitting(true);
     setBuildLogs(prev => prev + `\n> Iniciando Commit e Push para ${settings.github!.repoName}...\n`);
     setShowConsole(true);
+    setBuildStatus('queued'); // Optimistic UI
 
     try {
         await commitAndPushFiles(settings.github!, filesToPush, `Update plugin: ${new Date().toISOString()}`);
         setBuildLogs(prev => prev + `> Arquivos enviados com sucesso!\n> O GitHub Actions deve iniciar em breve.\n`);
-        setBuildStatus('queued');
         
         // Start polling for build
         pollBuildStatus();
     } catch (e: any) {
         setBuildLogs(prev => prev + `> ERRO ao enviar: ${e.message}\n`);
+        setBuildStatus('idle'); // Reset on send error
     } finally {
         setIsCommitting(false);
     }
@@ -112,7 +113,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       setBuildLogs(prev => prev + `> Aguardando início do Workflow (GitHub Actions)...\n`);
       
       let attempts = 0;
-      const maxAttempts = 30; // 30 * 2s = 60s timeout for start
       const pollInterval = setInterval(async () => {
           attempts++;
           try {
@@ -135,6 +135,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                          }
                      } else {
                          setBuildStatus('failure');
+                         setBuildLogs(prev => prev + `> Build falhou. Tente usar a Correção Automática.\n`);
                      }
                  } else {
                      setBuildStatus('in_progress');
@@ -150,11 +151,38 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
           if (attempts > 120) { // 4 minutes max polling
               clearInterval(pollInterval);
               setBuildLogs(prev => prev + `> Timeout aguardando build.\n`);
+              setBuildStatus('idle');
           }
       }, 2000);
   };
 
-  // 4. Download Artifact
+  // 4. Auto Fix
+  const handleAutoFix = async () => {
+      if (!project || !buildLogs) return;
+      
+      setIsFixing(true);
+      setBuildLogs(prev => prev + `\n> 🧠 IA: Analisando logs de erro e corrigindo código...\n`);
+      
+      try {
+          // Extrair as últimas linhas de log relevantes (para não estourar tokens)
+          const relevantLogs = buildLogs.slice(-2000); // Last 2000 chars roughly
+          
+          const fixedProject = await fixPluginCode(project, relevantLogs, settings);
+          
+          if (onProjectUpdate) {
+              onProjectUpdate(fixedProject);
+          }
+          
+          setBuildLogs(prev => prev + `> 🧠 IA: Correções aplicadas! Clique em "Commit & Push" para testar novamente.\n`);
+          setBuildStatus('idle'); // Reset status so user can push again
+      } catch (e: any) {
+          setBuildLogs(prev => prev + `> 🧠 IA Erro: ${e.message}\n`);
+      } finally {
+          setIsFixing(false);
+      }
+  };
+
+  // 5. Download Artifact
   const handleDownloadArtifact = async () => {
       if (!artifactUrl || !settings.github) return;
       try {
@@ -168,7 +196,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     if (!project) return;
     const zip = new JSZip();
     project.files.forEach(file => zip.file(file.path, file.content));
-    // Include dummy gradlew for manual usage if user wants, but ideally they use installed gradle
     zip.file("gradlew", `#!/bin/sh\necho "Please use 'gradle build' command directly as wrapper is not included."\n`);
     const blob = await zip.generateAsync({type:"blob"});
     const url = URL.createObjectURL(blob);
@@ -208,8 +235,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     {/* 1. Commit/Push Button */}
                     <button 
                       onClick={handleCommitAndPush}
-                      disabled={isCommitting || !settings.github?.isConnected}
-                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 cursor-not-allowed text-gray-500' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
+                      disabled={isCommitting || !settings.github?.isConnected || isFixing}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected || isFixing ? 'opacity-50 cursor-not-allowed text-gray-500' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}`}
                       title={!settings.github?.isConnected ? "Conecte o GitHub na barra lateral" : "Enviar alterações para o GitHub"}
                     >
                         {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
@@ -231,7 +258,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     ) : (
                          <button 
                             onClick={() => { setShowConsole(true); if(buildStatus === 'idle') handleCommitAndPush(); }}
-                            disabled={!settings.github?.isConnected}
+                            disabled={!settings.github?.isConnected || isFixing}
                             className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold
                                 ${buildStatus === 'in_progress' || buildStatus === 'queued' ? 'text-yellow-400' : 
                                   buildStatus === 'failure' ? 'text-red-400' : 'text-gray-300 hover:bg-gray-700'}`}
@@ -333,9 +360,21 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
               {buildStatus === 'in_progress' && <span className="text-yellow-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin"/> Compilando na Nuvem...</span>}
               {buildStatus === 'success' && <span className="text-green-500 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Sucesso</span>}
               {buildStatus === 'failure' && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3"/> Falha</span>}
+              
+              {isFixing && <span className="text-purple-400 flex items-center gap-1"><Wand2 className="w-3 h-3 animate-pulse"/> Corrigindo com IA...</span>}
             </div>
             
             <div className="flex items-center gap-2">
+              {/* AUTO FIX BUTTON - Só aparece se falhar */}
+              {buildStatus === 'failure' && !isFixing && (
+                  <button 
+                    onClick={handleAutoFix}
+                    className="flex items-center gap-1.5 bg-purple-500/20 hover:bg-purple-500/40 text-purple-300 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-purple-500/30 transition-all"
+                  >
+                     <Sparkles className="w-3 h-3" /> Corrigir Erros
+                  </button>
+              )}
+              
               <button onClick={() => setShowConsole(false)} className="text-gray-400 hover:text-white transition-colors">
                 <ChevronDown className="w-4 h-4" />
               </button>
