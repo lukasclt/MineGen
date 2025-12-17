@@ -6,7 +6,6 @@ import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { generatePluginCode, fixPluginCode } from './services/geminiService';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -144,8 +143,9 @@ const App: React.FC = () => {
   };
 
   const handleTriggerAutoFix = (logs: string) => {
+    // Enviamos apenas os logs, ChatInterface cuida do visual
     setExternalChatRequest({
-      prompt: `Detectei um erro no build do Maven. Aqui estão os logs:\n\n${logs}\n\nPor favor, analise e corrija o código do plugin.`,
+      prompt: logs,
       isFix: true
     });
   };

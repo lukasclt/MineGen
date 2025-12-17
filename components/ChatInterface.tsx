@@ -66,7 +66,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages, isLoading, progress, reasoningStep]);
 
-  // Handle external requests (like Auto-Fix)
   useEffect(() => {
     if (externalRequest && !isLoading) {
       handleProcessRequest(externalRequest.prompt, externalRequest.isFix);
@@ -90,7 +89,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
-    // A mensagem visual no chat deve ser limpa conforme a imagem do usuário
+    // A mensagem VISUAL no chat segue exatamente o estilo solicitado
     const displayMessageText = isFix 
       ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...`
       : text;
@@ -100,7 +99,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       text: displayMessageText 
     };
     
-    setMessages([...messages, userMessage]);
+    // Atualizamos a lista de mensagens IMEDIATAMENTE para mostrar o balão
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput('');
     setIsLoading(true);
     setIsFixingMode(isFix);
@@ -117,8 +118,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       let project;
       if (isFix && currentProject) {
-          // Passamos o 'text' (que contém os logs originais) para a IA,
-          // mas a mensagem exibida no chat continua sendo a 'displayMessageText'.
+          // 'text' aqui contém os logs reais passados pelo CodeViewer
           project = await fixPluginCode(currentProject, text, settings);
       } else {
           project = await generatePluginCode(text, settings, currentProject);
@@ -135,7 +135,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         projectData: project
       };
       
-      setMessages([...messages, userMessage, aiMessage]);
+      setMessages([...newMessages, aiMessage]);
       onProjectGenerated(project);
     } catch (error: any) {
       clearInterval(progressInterval);
@@ -144,7 +144,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         text: error.message || "Ocorreu um erro ao processar sua solicitação.",
         isError: true
       };
-      setMessages([...messages, userMessage, errorMessage]);
+      setMessages([...newMessages, errorMessage]);
     } finally {
       setIsLoading(false);
       setProgress(0);

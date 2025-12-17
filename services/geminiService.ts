@@ -93,29 +93,27 @@ export const fixPluginCode = async (
 
   const prompt = `
 # CONTEXTO
-O build do Maven falhou para o plugin "${settings.name}". Você deve atuar como um engenheiro de software sênior para corrigir o código.
+O build do Maven falhou para o plugin "${settings.name}" na versão ${settings.mcVersion}.
 
-# RESTRIÇÕES (CRÍTICO)
-1. **PRESERVAÇÃO TOTAL**: O campo "files" do seu JSON deve conter TODOS os arquivos do projeto. Se você omitir uma classe Java, ela será deletada. MANTENHA TUDO.
-2. **COMPATIBILIDADE**: Verifique se as dependências no pom.xml condizem com a versão do Minecraft (${settings.mcVersion}) e Java (${settings.javaVersion}).
-3. **RESPOSTA**: Retorne APENAS o JSON com os campos "explanation" e "files".
+# RESTRIÇÕES
+1. **PRESERVAÇÃO TOTAL**: O campo "files" do seu JSON deve conter TODOS os arquivos do projeto.
+2. **CORREÇÃO CIRÚRGICA**: Corrija apenas o que causou o erro de compilação ou dependência.
 
-# CONTEÚDO (LOGS E CÓDIGO)
-LOGS DE ERRO DO MAVEN:
+# CONTEÚDO (LOGS)
 ${buildLogs}
 
-CÓDIGO ATUAL DO PROJETO:
+# CONTEÚDO (CÓDIGO ATUAL)
 ${fileContext}
 
 # SOLICITAÇÃO
-Analise os logs, identifique os erros nos arquivos acima e forneça a versão corrigida de todo o projeto.
+Analise os logs acima e aplique as correções necessárias em todo o projeto.
   `;
 
   try {
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Engenheiro de Software Sênior em modo de depuração." },
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Engenheiro de Software Sênior especializado em Debug." },
         { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" }
