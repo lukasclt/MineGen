@@ -36,25 +36,32 @@ export const generatePluginCode = async (
   let userPromptContext = "";
 
   if (previousProject && previousProject.files.length > 0) {
-    const fileContext = previousProject.files.map(f => `--- ARQUIVO: ${f.path} ---\n${f.content}`).join("\n\n");
+    const fileContext = previousProject.files.map(f => `--- FILE: ${f.path} ---\n${f.content}`).join("\n\n");
     userPromptContext = `
-      ESTADO ATUAL DO PROJETO:
-      ${fileContext}
-      
-      MUDANÇA SOLICITADA:
-      ${prompt}
-      
-      IMPORTANTE: Retorne a lista COMPLETA de arquivos no JSON, incluindo os que não mudaram.
+# CONTEXTO
+Usuário deseja modificar o projeto "${settings.name}" (${settings.platform}).
+
+# ESTADO ATUAL DO PROJETO
+${fileContext}
+
+# SOLICITAÇÃO DO USUÁRIO
+${prompt}
+
+# RESTRIÇÕES
+1. Mantenha todos os arquivos no campo "files".
+2. Retorne apenas JSON válido.
     `;
   } else {
     userPromptContext = `
-      Novo Projeto Minecraft:
-      - Nome: ${settings.name}
-      - Plataforma: ${settings.platform}
-      - Java: ${settings.javaVersion}
-      - Minecraft: ${settings.mcVersion}
-      
-      Solicitação: ${prompt}
+# CONTEXTO
+Criar um novo plugin Minecraft.
+Nome: ${settings.name}
+Plataforma: ${settings.platform}
+Java: ${settings.javaVersion}
+MC: ${settings.mcVersion}
+
+# SOLICITAÇÃO
+${prompt}
     `;
   }
 
@@ -82,27 +89,33 @@ export const fixPluginCode = async (
   settings: PluginSettings
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
-  const fileContext = project.files.map(f => `--- ARQUIVO: ${f.path} ---\n${f.content}`).join("\n\n");
+  const fileContext = project.files.map(f => `--- FILE: ${f.path} ---\n${f.content}`).join("\n\n");
 
   const prompt = `
-    ERRO DE COMPILAÇÃO MAVEN DETECTADO.
-    
-    LOGS DE ERRO:
-    ${buildLogs}
-    
-    CÓDIGO ATUAL DO PROJETO:
-    ${fileContext}
-    
-    TAREFA:
-    1. Analise os logs e corrija os arquivos necessários.
-    2. RETORNE TODOS OS ARQUIVOS DO PROJETO NO JSON FINAL. Não remova as classes Java. Se você retornar apenas o pom.xml, você causará a perda de todo o código do usuário. MANTENHA TUDO.
+# CONTEXTO
+O build do Maven falhou para o plugin "${settings.name}". Você deve atuar como um engenheiro de software sênior para corrigir o código.
+
+# RESTRIÇÕES (CRÍTICO)
+1. **PRESERVAÇÃO TOTAL**: O campo "files" do seu JSON deve conter TODOS os arquivos do projeto. Se você omitir uma classe Java, ela será deletada. MANTENHA TUDO.
+2. **COMPATIBILIDADE**: Verifique se as dependências no pom.xml condizem com a versão do Minecraft (${settings.mcVersion}) e Java (${settings.javaVersion}).
+3. **RESPOSTA**: Retorne APENAS o JSON com os campos "explanation" e "files".
+
+# CONTEÚDO (LOGS E CÓDIGO)
+LOGS DE ERRO DO MAVEN:
+${buildLogs}
+
+CÓDIGO ATUAL DO PROJETO:
+${fileContext}
+
+# SOLICITAÇÃO
+Analise os logs, identifique os erros nos arquivos acima e forneça a versão corrigida de todo o projeto.
   `;
 
   try {
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION + "\nFOCO: Reparo de erros sem perda de arquivos." },
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Engenheiro de Software Sênior em modo de depuração." },
         { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" }
