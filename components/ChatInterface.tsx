@@ -48,7 +48,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [reasoningStep, setReasoningStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [queue, setQueue] = useState<string[]>([]);
-
+  
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -85,6 +86,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     processNextInQueue();
   }, [queue, isLoading, currentProject]); // Depends on currentProject to chain generations correctly
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
 
   const handleSelectFolder = async () => {
     try {
@@ -183,6 +192,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+    }
 
     // 3. Add to Queue
     setQueue(prev => [...prev, text]);
@@ -191,6 +203,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleAddToQueue(input);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleAddToQueue(input);
+    }
   };
 
   const handleClear = () => {
@@ -306,16 +325,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       <div className="absolute bottom-0 left-0 right-0 p-4 pt-10 bg-gradient-to-t from-mc-dark via-mc-dark to-transparent z-10">
         <form onSubmit={handleSubmit} className="relative max-w-4xl mx-auto group">
-          <input 
-            type="text" 
+          <textarea
+            ref={textareaRef} 
             value={input} 
-            onChange={(e) => setInput(e.target.value)} 
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={1}
             placeholder={directoryHandle ? (queue.length > 0 ? "Adicionar à fila..." : (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...")) : "Digite para Selecionar a Pasta de Destino..."} 
-            className={`w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border ${!directoryHandle ? 'border-mc-gold/50 shadow-[0_0_15px_rgba(255,170,0,0.1)]' : 'border-gray-600'} rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500`} 
-            // Removed disabled={isLoading} to allow queuing
+            className={`w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border ${!directoryHandle ? 'border-mc-gold/50 shadow-[0_0_15px_rgba(255,170,0,0.1)]' : 'border-gray-600'} rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500 resize-none custom-scrollbar`}
+            style={{ minHeight: '54px', maxHeight: '200px' }} 
           />
-          <button type="submit" disabled={!input.trim()} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95">
-             {/* If directory is not set, show Folder icon. If Loading but input available, show Plus (Add to queue) or Send */}
+          <button type="submit" disabled={!input.trim()} className="absolute right-2 bottom-3 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95 h-9">
              {!directoryHandle ? <FolderInput className="w-5 h-5" /> : (isLoading ? <Layers className="w-5 h-5" /> : <Send className="w-5 h-5" />)}
           </button>
         </form>
