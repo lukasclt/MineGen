@@ -39,7 +39,7 @@ export const generatePluginCode = async (
     const fileContext = previousProject.files.map(f => `--- FILE: ${f.path} ---\n${f.content}`).join("\n\n");
     userPromptContext = `
 # CONTEXTO
-Usuário deseja modificar o projeto "${settings.name}" (${settings.platform}).
+Você está modificando o projeto "${settings.name}" para a plataforma ${settings.platform} (MC ${settings.mcVersion}, Java ${settings.javaVersion}).
 
 # ESTADO ATUAL DO PROJETO
 ${fileContext}
@@ -47,18 +47,19 @@ ${fileContext}
 # SOLICITAÇÃO DO USUÁRIO
 ${prompt}
 
-# RESTRIÇÕES
-1. Mantenha todos os arquivos no campo "files".
-2. Retorne apenas JSON válido.
+# INSTRUÇÕES TÉCNICAS
+1. Mantenha a integridade de todas as classes.
+2. Atualize o pom.xml se novas dependências forem necessárias.
+3. Garanta que o código siga os padrões da API selecionada.
     `;
   } else {
     userPromptContext = `
 # CONTEXTO
-Criar um novo plugin Minecraft.
+Criar um novo projeto de plugin Minecraft do zero.
 Nome: ${settings.name}
 Plataforma: ${settings.platform}
-Java: ${settings.javaVersion}
-MC: ${settings.mcVersion}
+Versão Java: ${settings.javaVersion}
+Versão Minecraft: ${settings.mcVersion}
 
 # SOLICITAÇÃO
 ${prompt}
@@ -91,19 +92,21 @@ export const fixPluginCode = async (
   const model = getModel(settings);
   const fileContext = project.files.map(f => `--- FILE: ${f.path} ---\n${f.content}`).join("\n\n");
 
+  // Prompt Tipo C: Context, Content, Constraints
   const prompt = `
-# CONTEXTO
-O build do Maven falhou para o projeto "${settings.name}" na versão ${settings.mcVersion}.
+# CONTEXTO (CONTEXT)
+Você é um Engenheiro de Software Sênior em Java e Maven, especializado em debugging de plugins Minecraft (${settings.platform}).
+O build do projeto "${settings.name}" falhou na pipeline de CI/CD.
 
-# TAREFA (DEBUGGING PROFUNDO - PROMPT TIPO C)
-1. Analise rigorosamente os logs de erro anexados abaixo.
-2. Identifique a causa raiz técnica (ex: versão de Java incompatível, erro de sintaxe, dependência ausente).
-3. No campo "explanation", descreva o diagnóstico detalhado e como você o corrigiu. Seja técnico.
-4. Aplique a correção técnica em todos os arquivos afetados, garantindo que o build passe.
+# CONTEÚDO (CONTENT)
+1. **Análise**: Examine os logs de erro fornecidos abaixo para identificar a causa raiz (Ex: dependência faltando, erro de sintaxe, versão Java incorreta).
+2. **Explicação**: No campo "explanation", descreva tecnicamente o erro encontrado e a solução aplicada (Ex: "A dependência 'bungeecord-chat' não foi encontrada. Adicionei o repositório Sonatype ao pom.xml").
+3. **Correção**: Aplique as correções necessárias nos arquivos do projeto para garantir que o build passe.
 
-# RESTRIÇÕES
-- Preservação: Retorne a lista COMPLETA de arquivos em "files". NUNCA omita arquivos do workspace.
-- Qualidade: Siga as convenções Java e da plataforma ${settings.platform}.
+# RESTRIÇÕES (CONSTRAINTS)
+- **Integridade**: Retorne a lista COMPLETA de arquivos em "files". NÃO omita arquivos que não foram alterados.
+- **Formato**: A resposta deve ser estritamente um JSON válido.
+- **Escopo**: Corrija apenas o necessário para resolver o erro de build.
 
 # LOGS DE ERRO DO MAVEN
 ${buildLogs}
@@ -116,7 +119,7 @@ ${fileContext}
     const completion = await client.chat.completions.create({
       model: model,
       messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Engenheiro de Software Sênior especializado em Troubleshooting de JVM e Maven." },
+        { role: "system", content: SYSTEM_INSTRUCTION + "\nESTILO: Especialista em Troubleshooting Técnico." },
         { role: "user", content: prompt }
       ],
       response_format: { type: "json_object" }

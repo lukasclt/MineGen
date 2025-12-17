@@ -29,13 +29,13 @@ const REASONING_STEPS = [
 ];
 
 const FIX_REASONING_STEPS = [
-  "Injetando logs de erro no núcleo de processamento...",
-  "Rastreando falhas na pilha de chamadas (Stack Trace)...",
-  "Identificando divergências de dependência no pom.xml...",
-  "Localizando erros de compilação em tempo real...",
-  "Gerando patch de correção estrutural...",
-  "Validando integridade do workspace...",
-  "Finalizando reparo automático com sucesso..."
+  "Extraindo logs de erro do sistema de build...",
+  "Rastreando falhas na pilha de chamadas...",
+  "Identificando dependências ausentes no pom.xml...",
+  "Analizando erros de sintaxe ou versão Java...",
+  "Calculando patch de correção estrutural...",
+  "Validando integridade do código corrigido...",
+  "Finalizando reparo automático..."
 ];
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -66,7 +66,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages, isLoading, progress, reasoningStep]);
 
-  // Detector de Requisições Externas (Auto-Fix Automático do Console)
+  // Efeito para capturar requisições automáticas do console (Auto-Fix)
   useEffect(() => {
     if (externalRequest && !isLoading) {
       handleProcessRequest(externalRequest.prompt, externalRequest.isFix);
@@ -90,9 +90,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleProcessRequest = async (text: string, isFix: boolean = false) => {
     if (!text.trim() || isLoading) return;
 
-    // Cabeçalho estilizado para Auto-Fix Automático (conforme imagem do usuário)
+    // Layout alinhado com a imagem do usuário
     const displayMessageText = isFix 
-      ? `🔧 **Auto-Fix Automático Solicitado**\nLogs de erro detectados no build. Iniciando correção...\n\n\`\`\`bash\n${text}\n\`\`\``
+      ? `🔧 **Auto-Fix Solicitado**\nLogs de erro detectados. Iniciando correção...\n\n\`\`\`bash\n${text}\n\`\`\``
       : text;
 
     const userMessage: ChatMessage = { 
@@ -106,7 +106,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsLoading(true);
     setIsFixingMode(isFix);
     setProgress(0);
-    setLoadingText(isFix ? 'Analisando Logs...' : (currentProject ? 'Refatorando...' : 'Arquitetando...'));
+    setLoadingText(isFix ? 'Debugando Erros...' : (currentProject ? 'Refatorando...' : 'Arquitetando...'));
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
@@ -233,9 +233,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     </motion.div>
                   </div>
 
-                  <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2">
+                  <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2 shadow-inner">
                     <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-[0.2em] opacity-80">
-                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} {isFixingMode ? "Análise de Falhas" : "Pensamento Computacional"}
+                      {isFixingMode ? <Search className="w-3 h-3" /> : <BrainCircuit className="w-3 h-3" />} {isFixingMode ? "Deep Debugging" : "Pensamento Computacional"}
                     </div>
                     <div className="flex items-start gap-2 min-h-[30px]">
                       <TerminalIcon className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />

@@ -129,7 +129,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      } else {
                          setBuildStatus('failure');
                          setBuildLogs(prev => prev + `> ❌ FALHA: Build falhou. Analisando logs para Auto-Fix...\n`);
-                         // Aguarda 3 segundos para disparar automaticamente o Auto-Fix conforme solicitado
+                         // Aguarda 3 segundos exatos para o efeito visual de análise antes de injetar no chat
                          setTimeout(handleAutoFix, 3000);
                      }
                  } else {
