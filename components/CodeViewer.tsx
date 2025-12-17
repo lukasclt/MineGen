@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Copy, Check, FolderOpen, Download, Terminal, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon } from 'lucide-react';
+import { FileCode, Copy, Check, FolderOpen, Download, Terminal, Loader2, UploadCloud, ChevronDown, Wrench, Infinity as InfinityIcon, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JSZip from 'jszip';
 import { commitAndPushFiles, getLatestWorkflowRun, getWorkflowRunLogs } from '../services/githubService';
@@ -34,16 +34,15 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
 
   const selectedFile = project?.files.find(f => f.path === selectedFilePath) || null;
 
-  // Ciclo Eterno: Se o projeto mudar após um fix e o Eterno estiver ligado, faz Push automático
   useEffect(() => {
     if (isFixingInProgressRef.current && project) {
       isFixingInProgressRef.current = false;
       if (autoFixEterno) {
-        console.log("Ciclo Eterno: Reiniciando build após correção...");
-        setTimeout(() => handleCommitAndPush(true), 1500);
+        setBuildLogs(prev => prev + `> 🔄 Auto-Fix concluído. Reiniciando build automaticamente...\n`);
+        setTimeout(() => handleCommitAndPush(true), 2000);
       }
     }
-  }, [project]);
+  }, [project, autoFixEterno]);
 
   useEffect(() => {
     if (project && project.files.length > 0) {
@@ -85,18 +84,17 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     setIsCommitting(true);
     setBuildProgress(0);
     if (!silent) setShowConsole(true);
-    setBuildLogs(prev => prev + `\n> 🚀 [BUILD #${fixCount + 1}] Iniciando build...\n`);
+    setBuildLogs(prev => prev + `\n> 🚀 [BUILD #${fixCount + 1}] Iniciando compilação no GitHub Actions...\n`);
     setBuildStatus('queued');
 
     try {
         await commitAndPushFiles(settings.github!, filesToPush, `Build Ciclo #${fixCount + 1}`);
-        setBuildLogs(prev => prev + `> Arquivos enviados. Aguardando processamento do Runner...\n`);
+        setBuildLogs(prev => prev + `> Arquivos enviados. Hook de Build acionado.\n`);
         pollBuildStatus();
     } catch (e: any) {
         setBuildLogs(prev => prev + `> 🛑 ERRO no Push: ${e.message}\n`);
         setBuildStatus('idle');
         buildInProgressRef.current = false;
-    } finally {
         setIsCommitting(false);
     }
   };
@@ -108,9 +106,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       
       const pollInterval = setInterval(async () => {
           attempts++;
-          if (progressSim < 90) {
-              progressSim += 1.5;
-              setBuildProgress(Math.round(progressSim));
+          if (progressSim < 95) {
+              progressSim += Math.random() * 2;
+              setBuildProgress(Math.min(95, Math.round(progressSim)));
           }
 
           try {
@@ -121,15 +119,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                      clearInterval(pollInterval);
                      setBuildProgress(100);
                      buildInProgressRef.current = false;
+                     setIsCommitting(false);
                      
                      if (run.conclusion === 'success') {
                          setBuildStatus('success');
-                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Build concluído!\n`);
+                         setBuildLogs(prev => prev + `> ✅ SUCESSO: Build concluído com perfeição!\n`);
                          setFixCount(0);
                          isFixingInProgressRef.current = false;
                      } else {
                          setBuildStatus('failure');
-                         setBuildLogs(prev => prev + `> ❌ FALHA: O build falhou. Iniciando Auto-Fix...\n`);
+                         setBuildLogs(prev => prev + `> ❌ FALHA: Build falhou. Analisando logs para Auto-Fix...\n`);
                          handleAutoFix();
                      }
                  } else {
@@ -138,12 +137,13 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
              }
           } catch (e) { console.error(e); }
 
-          if (attempts > 120) {
+          if (attempts > 150) {
               clearInterval(pollInterval);
-              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: Runner demorou demais.\n`);
+              setBuildLogs(prev => prev + `> 🛑 TIMEOUT: Runner demorou demais. Abortando.\n`);
               buildInProgressRef.current = false;
+              setIsCommitting(false);
           }
-      }, 5000);
+      }, 4000);
   };
 
   const handleAutoFix = async () => {
@@ -151,12 +151,23 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
     
     try {
         const realLogs = await getWorkflowRunLogs(settings.github, lastRunId);
-        const errorLines = realLogs.split('\n').filter(line => line.includes('[ERROR]') || line.includes('Compilation failure'));
-        const contextLogs = errorLines.length > 0 ? errorLines.join('\n') : realLogs.substring(Math.max(0, realLogs.length - 3000));
+        
+        // Extrair apenas as partes mais relevantes dos logs para não estourar contexto
+        const lines = realLogs.split('\n');
+        const errorStartIndex = lines.findIndex(l => l.includes('[ERROR]') || l.includes('Compilation failure'));
+        let relevantLogs = realLogs;
+        if (errorStartIndex !== -1) {
+            relevantLogs = lines.slice(Math.max(0, errorStartIndex - 5)).join('\n');
+        }
+        
+        // Se ainda for muito grande, pega os últimos 4000 caracteres
+        if (relevantLogs.length > 5000) {
+            relevantLogs = relevantLogs.substring(relevantLogs.length - 5000);
+        }
         
         isFixingInProgressRef.current = true;
         setFixCount(prev => prev + 1);
-        onTriggerAutoFix(contextLogs);
+        onTriggerAutoFix(relevantLogs);
     } catch (e: any) {
         setBuildLogs(prev => prev + `> ⚠️ Falha ao ler logs: ${e.message}\n`);
         isFixingInProgressRef.current = false;
@@ -179,18 +190,23 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#1e1e1e] border-l border-gray-800 overflow-hidden relative">
-        <div className="h-12 border-b border-gray-700 flex items-center justify-between px-4 bg-[#252526] shrink-0">
+        <div className="h-12 border-b border-gray-700 flex items-center justify-between px-4 bg-[#252526] shrink-0 z-10 shadow-md">
             <h3 className="text-sm font-medium text-white flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-mc-accent" />
                 {settings.name}
+                {isFixingInProgressRef.current && (
+                  <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-orange-500/10 border border-orange-500/50 text-orange-400 text-[10px] animate-pulse">
+                    <Zap className="w-2.5 h-2.5" /> AUTO-FIXING
+                  </span>
+                )}
             </h3>
             
             <div className="flex items-center gap-2">
-                 <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-gray-700 mr-2">
+                 <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-gray-700 mr-2 shadow-inner">
                     <button 
                       onClick={() => handleCommitAndPush()} 
                       disabled={isCommitting || !settings.github?.isConnected} 
-                      className={`text-xs px-4 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-mc-accent hover:bg-mc-accent/10'}`}
+                      className={`text-xs px-4 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${!settings.github?.isConnected ? 'opacity-50 text-gray-500' : 'text-mc-accent hover:bg-mc-accent/10 active:scale-95'}`}
                     >
                         {isCommitting ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />}
                         <span>Push {fixCount > 0 ? `(${fixCount})` : ''}</span>
@@ -200,7 +216,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     
                     <button 
                       onClick={() => setAutoFixEterno(!autoFixEterno)} 
-                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10' : 'text-gray-500 hover:text-gray-300'}`}
+                      className={`text-xs px-3 py-1.5 rounded-md flex items-center gap-2 transition-all font-semibold ${autoFixEterno ? 'text-mc-gold bg-mc-gold/10 shadow-[0_0_10px_rgba(255,170,0,0.1)]' : 'text-gray-500 hover:text-gray-300'}`}
                       title="Auto-Fix Eterno: Ciclo infinito de correção e build"
                     >
                         <InfinityIcon className={`w-3 h-3 ${autoFixEterno ? 'animate-pulse' : ''}`} />
@@ -208,14 +224,14 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     </button>
                  </div>
 
-                <button onClick={handleDownloadSource} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold px-3 py-1.5 rounded flex items-center gap-2 transition-colors">
+                <button onClick={handleDownloadSource} className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold px-3 py-1.5 rounded flex items-center gap-2 transition-colors active:scale-95">
                     <Download className="w-3 h-3" /> Fonte
                 </button>
             </div>
         </div>
 
       <div className="flex-1 flex overflow-hidden relative">
-        <div className="w-56 bg-[#252526]/50 border-r border-gray-700 overflow-y-auto shrink-0 custom-scrollbar">
+        <div className="w-56 bg-[#252526]/50 border-r border-gray-700 overflow-y-auto shrink-0 custom-scrollbar shadow-xl">
           <div className="py-2">
             {project?.files.map((file, index) => {
                const fileName = file.path.split('/').pop();
@@ -225,9 +241,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                   key={file.path} 
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.02 }}
+                  transition={{ delay: index * 0.01 }}
                   onClick={() => setSelectedFilePath(file.path)} 
-                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 truncate ${isSelected ? 'bg-[#37373d] text-white border-l-2 border-mc-accent' : 'text-gray-400 border-l-2 border-transparent hover:bg-white/5'}`}
+                  className={`w-full text-left px-4 py-1.5 text-xs flex items-center gap-2 truncate transition-all ${isSelected ? 'bg-[#37373d] text-white border-l-2 border-mc-accent' : 'text-gray-400 border-l-2 border-transparent hover:bg-white/5 hover:text-gray-300'}`}
                 >
                     <FileCode className={`w-3.5 h-3.5 ${file.language === 'java' ? 'text-orange-400' : 'text-blue-400'}`} />
                     <span className="truncate">{fileName}</span>
@@ -248,13 +264,13 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
                     className="flex-1 flex flex-col h-full"
                   >
                       <div className="h-8 flex items-center justify-between px-4 bg-black/20 border-b border-gray-800 shrink-0">
-                          <span className="text-[10px] text-gray-500 font-mono">{selectedFile.path}</span>
-                          <button onClick={handleCopy} className="text-gray-500 hover:text-white transition-colors">
-                            {copied ? <Check className="w-3 h-3 text-mc-green" /> : <Copy className="w-3 h-3" />}
+                          <span className="text-[10px] text-gray-500 font-mono tracking-tight">{selectedFile.path}</span>
+                          <button onClick={handleCopy} className="text-gray-500 hover:text-white transition-colors p-1">
+                            {copied ? <Check className="w-3.5 h-3.5 text-mc-green" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
                       </div>
-                      <div className="flex-1 overflow-auto p-4 custom-scrollbar font-mono text-sm leading-relaxed text-gray-300">
-                          <pre className="whitespace-pre select-text"><code>{selectedFile.content}</code></pre>
+                      <div className="flex-1 overflow-auto p-4 custom-scrollbar font-mono text-[13px] leading-relaxed text-gray-300">
+                          <pre className="whitespace-pre select-text"><code className="block">{selectedFile.content}</code></pre>
                       </div>
                   </motion.div>
               ) : (
@@ -265,24 +281,30 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, onProjectUpd
       </div>
 
       <AnimatePresence>
-        {showConsole && (
+        {(showConsole || buildStatus !== 'idle') && (
           <motion.div 
             initial={{ height: 0 }}
-            animate={{ height: 240 }}
+            animate={{ height: 260 }}
             exit={{ height: 0 }}
-            className="border-t border-gray-700 bg-[#0f0f0f] flex flex-col shadow-2xl z-20"
+            className="border-t border-gray-700 bg-[#0f0f0f] flex flex-col shadow-[0_-10px_30px_rgba(0,0,0,0.5)] z-20"
           >
-            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/50 border-b border-gray-800 h-9 shrink-0">
-              <div className="flex items-center gap-3 text-[10px] font-mono text-gray-400 uppercase tracking-widest">
-                <Terminal className="w-3 h-3" />
+            <div className="flex items-center justify-between px-4 py-2 bg-gray-900/80 border-b border-gray-800 h-10 shrink-0">
+              <div className="flex items-center gap-4 text-[10px] font-mono text-gray-400 uppercase tracking-[0.15em]">
+                <Terminal className="w-3.5 h-3.5" />
                 <span>Console Maven</span>
-                {buildStatus === 'in_progress' && <span className="text-mc-accent animate-pulse">Building {buildProgress}%</span>}
-                {isFixingInProgressRef.current && <span className="text-red-400 animate-pulse">Auto-Fixing...</span>}
+                {buildStatus === 'in_progress' && (
+                   <div className="flex items-center gap-2">
+                     <span className="text-mc-accent animate-pulse font-bold">COMPILANDO {buildProgress}%</span>
+                     <div className="w-24 h-1 bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-mc-accent transition-all duration-500" style={{ width: `${buildProgress}%` }} />
+                     </div>
+                   </div>
+                )}
               </div>
-              <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white"><ChevronDown className="w-4 h-4" /></button>
+              <button onClick={() => setShowConsole(false)} className="text-gray-500 hover:text-white transition-colors"><ChevronDown className="w-5 h-5" /></button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-400 custom-scrollbar leading-tight bg-black/40">
-              <pre className="whitespace-pre-wrap">{buildLogs || "> Aguardando build..."}</pre>
+            <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] text-gray-400 custom-scrollbar leading-tight bg-black/60 shadow-inner">
+              <pre className="whitespace-pre-wrap font-mono">{buildLogs || "> Console pronto."}</pre>
               <div ref={consoleEndRef} />
             </div>
           </motion.div>
