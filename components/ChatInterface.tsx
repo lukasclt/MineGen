@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode } from '../services/geminiService';
 import { getDirectoryHandle, saveProjectToDisk, verifyPermission } from '../services/fileSystem';
@@ -9,7 +9,7 @@ import { getDirectoryHandle, saveProjectToDisk, verifyPermission } from '../serv
 interface ChatInterfaceProps {
   settings: PluginSettings;
   messages: ChatMessage[];
-  setMessages: (msgs: ChatMessage[]) => void;
+  setMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   currentProject: GeneratedProject | null;
   onProjectGenerated: (project: any) => void;
   onClearProject: () => void;
@@ -47,6 +47,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [loadingText, setLoadingText] = useState('');
   const [reasoningStep, setReasoningStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [queue, setQueue] = useState<string[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -70,13 +71,27 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => clearInterval(interval);
   }, [isLoading]);
 
+  // Queue Processor
+  useEffect(() => {
+    const processNextInQueue = async () => {
+      if (isLoading || queue.length === 0) return;
+
+      const nextPrompt = queue[0];
+      // Remove from queue immediately to prevent double processing
+      setQueue(prev => prev.slice(1));
+      
+      await executeAiGeneration(nextPrompt);
+    };
+
+    processNextInQueue();
+  }, [queue, isLoading, currentProject]); // Depends on currentProject to chain generations correctly
+
   const handleSelectFolder = async () => {
     try {
       const handle = await getDirectoryHandle();
       onSetDirectoryHandle(handle);
       return handle;
     } catch (error: any) {
-      // User cancelled or error
       if (error.name !== 'AbortError') {
          alert("Erro ao selecionar pasta: " + error.message);
       }
@@ -84,46 +99,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const handleProcessRequest = async (text: string) => {
-    if (!text.trim() || isLoading) return;
-
-    let currentHandle = directoryHandle;
-
-    // 1. Mandatory Folder Selection
-    if (!currentHandle) {
-       // Since this is triggered by a click, we can call this directly.
-       // However, to ensure clarity, let's ask confirm, or just rely on the fact user clicked "Send".
-       // The prompt says "mandatory to select folder".
-       const confirmSelect = window.confirm("Você precisa selecionar uma pasta local para onde o plugin será gerado/salvo.\n\nClique em OK para selecionar a pasta.");
-       if (!confirmSelect) return;
-       
-       currentHandle = await handleSelectFolder();
-       if (!currentHandle) return; // Cancelled
-    }
-
-    // 2. CRITICAL: Verify/Request Write Permissions NOW (while we have User Activation)
-    // If we wait until after generatePluginCode (which takes seconds), the activation expires
-    // and the browser will block the permission prompt/file access.
-    try {
-      const hasPermission = await verifyPermission(currentHandle, true);
-      if (!hasPermission) {
-        alert("Permissão de escrita negada. O MineGen precisa de permissão para salvar os arquivos.");
-        return;
-      }
-    } catch (e: any) {
-      alert("Erro ao verificar permissões: " + e.message);
-      return;
-    }
-
-    // 3. Start AI Processing
-    const userMessage: ChatMessage = { 
-      role: 'user', 
-      text: text 
-    };
-    
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    setInput('');
+  const executeAiGeneration = async (text: string) => {
     setIsLoading(true);
     setProgress(0);
     setLoadingText(currentProject ? 'Refatorando...' : 'Arquitetando...');
@@ -136,7 +112,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }, 400);
 
     try {
-      // AI Generation (Time consuming)
+      // AI Generation
       const project = await generatePluginCode(text, settings, currentProject);
       
       clearInterval(progressInterval);
@@ -144,9 +120,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setLoadingText('Salvando arquivos no disco...');
       setIsSaving(true);
 
-      // 4. Save to Disk
-      // Because we verified permission in step 2, the handle is ready to write without new prompts.
-      await saveProjectToDisk(currentHandle, project);
+      // Save to Disk
+      await saveProjectToDisk(directoryHandle, project);
       
       setIsSaving(false);
       setProgress(100);
@@ -159,7 +134,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         projectData: project
       };
       
-      setMessages([...newMessages, aiMessage]);
+      setMessages(prev => [...prev, aiMessage]);
       onProjectGenerated(project);
     } catch (error: any) {
       clearInterval(progressInterval);
@@ -169,16 +144,53 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         text: error.message || "Houve uma falha crítica no processo de geração.",
         isError: true
       };
-      setMessages([...newMessages, errorMessage]);
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
       setProgress(0);
     }
   };
 
+  const handleAddToQueue = async (text: string) => {
+    if (!text.trim()) return;
+
+    let currentHandle = directoryHandle;
+
+    // 1. Mandatory Folder Selection & Permission (User Gesture Context)
+    if (!currentHandle) {
+       const confirmSelect = window.confirm("Você precisa selecionar uma pasta local para onde o plugin será gerado/salvo.\n\nClique em OK para selecionar a pasta.");
+       if (!confirmSelect) return;
+       
+       currentHandle = await handleSelectFolder();
+       if (!currentHandle) return;
+    }
+
+    try {
+      const hasPermission = await verifyPermission(currentHandle, true);
+      if (!hasPermission) {
+        alert("Permissão de escrita negada. O MineGen precisa de permissão para salvar os arquivos.");
+        return;
+      }
+    } catch (e: any) {
+      alert("Erro ao verificar permissões: " + e.message);
+      return;
+    }
+
+    // 2. Add User Message to UI Immediately
+    const userMessage: ChatMessage = { 
+      role: 'user', 
+      text: text 
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+
+    // 3. Add to Queue
+    setQueue(prev => [...prev, text]);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleProcessRequest(input);
+    handleAddToQueue(input);
   };
 
   const handleClear = () => {
@@ -188,6 +200,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             text: `Histórico limpo. Como posso ajudar com o plugin ${settings.name}?` 
         };
         setMessages([defaultMsg]);
+        setQueue([]); // Clear queue too
     }
   };
 
@@ -274,6 +287,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         </motion.span>
                       </AnimatePresence>
                     </div>
+                    
+                    {queue.length > 0 && (
+                      <div className="flex items-center gap-2 border-t border-gray-700/50 pt-2 mt-1">
+                         <Layers className="w-3 h-3 text-mc-accent" />
+                         <span className="text-[10px] text-gray-400 font-mono">
+                           +{queue.length} mensagem(ns) na fila de processamento
+                         </span>
+                      </div>
+                    )}
                   </div>
               </div>
             </div>
@@ -288,12 +310,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             type="text" 
             value={input} 
             onChange={(e) => setInput(e.target.value)} 
-            placeholder={directoryHandle ? (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...") : "Digite para Selecionar a Pasta de Destino..."} 
+            placeholder={directoryHandle ? (queue.length > 0 ? "Adicionar à fila..." : (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...")) : "Digite para Selecionar a Pasta de Destino..."} 
             className={`w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border ${!directoryHandle ? 'border-mc-gold/50 shadow-[0_0_15px_rgba(255,170,0,0.1)]' : 'border-gray-600'} rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500`} 
-            disabled={isLoading} 
+            // Removed disabled={isLoading} to allow queuing
           />
-          <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95">
-            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : (!directoryHandle ? <FolderInput className="w-5 h-5" /> : <Send className="w-5 h-5" />)}
+          <button type="submit" disabled={!input.trim()} className="absolute right-2 top-2 bottom-2 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95">
+             {/* If directory is not set, show Folder icon. If Loading but input available, show Plus (Add to queue) or Send */}
+             {!directoryHandle ? <FolderInput className="w-5 h-5" /> : (isLoading ? <Layers className="w-5 h-5" /> : <Send className="w-5 h-5" />)}
           </button>
         </form>
       </div>
