@@ -1,7 +1,7 @@
 
 import OpenAI from 'openai';
-import { PluginSettings, GeneratedProject, Attachment } from "../types";
-import { SYSTEM_INSTRUCTION } from "../constants";
+import { PluginSettings, GeneratedProject, Attachment, BuildSystem } from "../types";
+import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
 const client = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -173,21 +173,52 @@ ${agentCapabilities}
   };
 
   try {
-    // Tentativa 1: Enviar imagens diretamente (Multimodal)
-    return await executeCall(buildPayload(false));
-  } catch (error: any) {
-    // Se o erro for de suporte a imagem ou 404 (endpoint not found for images)
-    // Nota: O erro 429 já foi tratado dentro do executeCall, aqui tratamos erros de CAPACIDADE do modelo (ex: não suporta img)
-    const isImageError = error.status === 404 || error.status === 400 || (error.message && error.message.toLowerCase().includes('image'));
+    let project: GeneratedProject;
 
-    if (isImageError) {
-      console.log("Modelo não suporta imagem ou endpoint inválido, tentando OCR fallback...");
-      
-      // Tentativa 2: Extrair texto (OCR) e enviar como texto
-      const ocrResult = await performOCR(attachments);
-      return await executeCall(buildPayload(true, ocrResult));
+    // Tentativa 1: Enviar imagens diretamente (Multimodal)
+    try {
+        project = await executeCall(buildPayload(false));
+    } catch (error: any) {
+        // Se o erro for de suporte a imagem ou 404 (endpoint not found for images)
+        const isImageError = error.status === 404 || error.status === 400 || (error.message && error.message.toLowerCase().includes('image'));
+        if (isImageError) {
+          console.log("Modelo não suporta imagem ou endpoint inválido, tentando OCR fallback...");
+          const ocrResult = await performOCR(attachments);
+          project = await executeCall(buildPayload(true, ocrResult));
+        } else {
+            throw error;
+        }
     }
-    
+
+    // --- PÓS-PROCESSAMENTO: Injeção do Gradle Wrapper ---
+    if (settings.buildSystem === BuildSystem.GRADLE) {
+        const hasGradlew = project.files.some(f => f.path === 'gradlew' || f.path === 'gradlew.bat');
+        
+        if (!hasGradlew) {
+            // Injetar wrapper padrão para facilitar a vida do usuário
+            project.files.push(
+                {
+                    path: 'gradlew',
+                    content: GRADLEW_UNIX,
+                    language: 'text'
+                },
+                {
+                    path: 'gradlew.bat',
+                    content: GRADLEW_BAT,
+                    language: 'text'
+                },
+                {
+                    path: 'gradle/wrapper/gradle-wrapper.properties',
+                    content: GRADLE_WRAPPER_PROPERTIES,
+                    language: 'text'
+                }
+            );
+        }
+    }
+
+    return project;
+
+  } catch (error: any) {
     throw new Error(error.message || "Erro na geração do plugin.");
   }
 };
