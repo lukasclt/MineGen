@@ -234,12 +234,12 @@ const App: React.FC = () => {
     addLog("Sistema: Projeto atualizado com sucesso.");
   };
 
-  // Call from Context Menu
-  const handleAddToContext = (text: string) => {
-     addLog("Usuário: Código enviado para contexto do chat.");
+  // Call from CodeViewer
+  const handleAddToContext = (fullMessage: string) => {
+     addLog("Usuário: Instrução de código enviada.");
      handleMessagesUpdate(prev => [...prev, {
        role: 'user',
-       text: `[Contexto Adicionado do Editor]:\n\`\`\`\n${text}\n\`\`\``
+       text: fullMessage
      }]);
   };
 

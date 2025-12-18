@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Save, Check, FolderOpen, RefreshCw, HardDrive, File, MoreVertical, X, MessageSquarePlus, TerminalSquare } from 'lucide-react';
+import { FileCode, Save, Check, FolderOpen, RefreshCw, HardDrive, File, MoreVertical, X, MessageSquarePlus, TerminalSquare, ArrowRight } from 'lucide-react';
 import { saveFileToDisk } from '../services/fileSystem';
 
 interface CodeViewerProps {
@@ -17,6 +17,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, text: string} | null>(null);
+  
+  // Prompt Modal State
+  const [isPromptOpen, setIsPromptOpen] = useState(false);
+  const [promptCode, setPromptCode] = useState<string>('');
+  const [promptInstruction, setPromptInstruction] = useState('');
+  const promptInputRef = useRef<HTMLTextAreaElement>(null);
 
   const files = project?.files || [];
   const selectedFile = files.find(f => f.path === selectedFilePath) || null;
@@ -25,7 +31,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
   // Sync content when file selection changes
   useEffect(() => {
     if (project && files.length > 0) {
-      // If no file selected, or selected file no longer exists, select first
       if (!selectedFilePath || !files.some(f => f.path === selectedFilePath)) {
           const mainFile = files.find(f => f.path.endsWith('Main.java') || f.path.endsWith('.java')) || files[0];
           setSelectedFilePath(mainFile?.path || null);
@@ -40,16 +45,20 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     } else {
         setFileContent('');
     }
-  }, [selectedFile, selectedFilePath]); // Depend on path to force refresh if same object ref but changed content
+  }, [selectedFile, selectedFilePath]);
 
-  // Save Handler
+  // Focus prompt input when modal opens
+  useEffect(() => {
+    if (isPromptOpen && promptInputRef.current) {
+        setTimeout(() => promptInputRef.current?.focus(), 100);
+    }
+  }, [isPromptOpen]);
+
   const handleSave = async () => {
     if (!selectedFile || !directoryHandle) return;
     setIsSaving(true);
     try {
         await saveFileToDisk(directoryHandle, selectedFile.path, fileContent);
-        // Update the file object in memory (simple mutation for performance in this context, 
-        // ideally should bubble up via onProjectUpdate)
         selectedFile.content = fileContent; 
         setIsDirty(false);
     } catch (e) {
@@ -60,6 +69,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     }
   };
 
+  const initiateSendToChat = (text: string) => {
+      setPromptCode(text);
+      setPromptInstruction('');
+      setIsPromptOpen(true);
+  };
+
   const handleSendSelectionToChat = () => {
     if (!textAreaRef.current) return;
     const start = textAreaRef.current.selectionStart;
@@ -68,10 +83,8 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     let textToSend = "";
 
     if (start !== end) {
-        // Envia seleção
         textToSend = textAreaRef.current.value.substring(start, end);
     } else {
-        // Se nada selecionado, envia o arquivo todo (com aviso)
         const confirmSend = window.confirm("Nenhum código selecionado. Enviar o arquivo inteiro para o Agente?");
         if (confirmSend) {
             textToSend = fileContent;
@@ -81,8 +94,24 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     }
 
     if (textToSend) {
-        onAddToContext(textToSend);
+        initiateSendToChat(textToSend);
     }
+  };
+
+  const confirmPrompt = () => {
+      if (!promptCode) return;
+      
+      const instruction = promptInstruction.trim() || "Analise este código.";
+      const fullMessage = `${instruction}\n\n\`\`\`java\n${promptCode}\n\`\`\``;
+      
+      onAddToContext(fullMessage);
+      setIsPromptOpen(false);
+  };
+
+  const handlePromptKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          confirmPrompt();
+      }
   };
 
   // Keyboard Shortcuts
@@ -118,7 +147,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
   }
 
   return (
-    <div className="flex w-full h-full bg-[#1e1e1e] overflow-hidden select-none" onClick={closeContextMenu}>
+    <div className="flex w-full h-full bg-[#1e1e1e] overflow-hidden select-none relative" onClick={closeContextMenu}>
       {/* Sidebar - Explorer */}
       <div className="w-64 bg-[#252526] flex flex-col border-r border-[#2b2b2b] shrink-0">
         <div className="h-9 px-4 flex items-center text-[11px] font-bold text-[#bbbbbb] uppercase tracking-wide shrink-0">
@@ -132,7 +161,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
             {files.map(file => {
                const fileName = file.path.split('/').pop();
                const isSelected = selectedFilePath === file.path;
-               // Minimalist file tree item
                return (
                 <div 
                     key={file.path} 
@@ -163,10 +191,10 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                      <button
                         onClick={handleSendSelectionToChat}
                         className="text-gray-300 hover:text-white hover:bg-[#333] px-2 py-1 rounded flex items-center gap-1.5 text-xs transition-colors border border-transparent hover:border-[#444]"
-                        title="Enviar código selecionado (ou arquivo) para o Agente"
+                        title="Enviar código selecionado para o Agente"
                      >
                         <MessageSquarePlus className="w-3.5 h-3.5" />
-                        <span>Enviar para Agente</span>
+                        <span>Enviar p/ Agente</span>
                      </button>
                      <div className="w-[1px] h-4 bg-[#333] mx-1"></div>
                     <button 
@@ -215,12 +243,12 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                 >
                      <button 
                         onClick={() => {
-                            onAddToContext(contextMenu.text);
+                            initiateSendToChat(contextMenu.text);
                             closeContextMenu();
                         }}
                         className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#094771] hover:text-white flex items-center gap-2"
                     >
-                        <MessageSquarePlus className="w-3 h-3" /> Adicionar ao Chat
+                        <MessageSquarePlus className="w-3 h-3" /> Adicionar ao Chat...
                     </button>
                     <div className="h-[1px] bg-[#454545] my-1 mx-2"></div>
                     <button className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#094771] hover:text-white opacity-50 cursor-not-allowed">
@@ -230,6 +258,60 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
             )}
         </div>
       </div>
+
+      {/* PROMPT MODAL */}
+      {isPromptOpen && (
+          <div className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-start justify-center pt-20">
+              <div className="bg-[#252526] border border-[#454545] shadow-2xl rounded-lg w-[500px] max-w-[90%] flex flex-col overflow-hidden animate-in slide-in-from-top-4 duration-200">
+                   <div className="bg-[#333] px-3 py-2 flex items-center justify-between border-b border-[#454545]">
+                       <span className="text-xs font-bold text-white flex items-center gap-2">
+                           <MessageSquarePlus className="w-4 h-4 text-mc-accent" />
+                           INSTRUÇÃO PARA O AGENTE
+                       </span>
+                       <button onClick={() => setIsPromptOpen(false)} className="text-gray-400 hover:text-white">
+                           <X className="w-4 h-4" />
+                       </button>
+                   </div>
+                   
+                   <div className="p-4 flex flex-col gap-3">
+                       <div>
+                           <label className="text-xs text-gray-400 font-semibold mb-1 block">O que você quer fazer com este código?</label>
+                           <textarea
+                               ref={promptInputRef}
+                               value={promptInstruction}
+                               onChange={(e) => setPromptInstruction(e.target.value)}
+                               onKeyDown={handlePromptKeyDown}
+                               placeholder="Ex: Refatore este método, Encontre o erro, Adicione comentários..."
+                               className="w-full bg-[#1e1e1e] border border-[#454545] rounded p-2 text-sm text-white focus:outline-none focus:border-mc-accent resize-none h-20"
+                           />
+                       </div>
+
+                       <div className="bg-[#1e1e1e] rounded border border-[#333] p-2 max-h-[150px] overflow-y-auto">
+                           <div className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">Preview do Contexto</div>
+                           <pre className="text-[11px] font-mono text-gray-400 whitespace-pre-wrap break-all">
+                               {promptCode.substring(0, 300)}
+                               {promptCode.length > 300 && '...'}
+                           </pre>
+                       </div>
+
+                       <div className="flex justify-end gap-2 mt-2">
+                           <button 
+                               onClick={() => setIsPromptOpen(false)}
+                               className="px-3 py-1.5 rounded text-xs font-medium text-gray-300 hover:text-white hover:bg-[#333]"
+                           >
+                               Cancelar
+                           </button>
+                           <button 
+                               onClick={confirmPrompt}
+                               className="px-3 py-1.5 rounded text-xs font-bold text-white bg-[#007acc] hover:bg-[#0062a3] flex items-center gap-1.5"
+                           >
+                               Enviar <ArrowRight className="w-3 h-3" />
+                           </button>
+                       </div>
+                   </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };
