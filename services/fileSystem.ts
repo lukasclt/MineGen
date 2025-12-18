@@ -1,5 +1,5 @@
 
-import { GeneratedProject } from "../types";
+import { GeneratedProject, GeneratedFile } from "../types";
 
 // --- IndexedDB Configuration ---
 const DB_NAME = 'MineGenDB';
@@ -47,6 +47,9 @@ export const getDirectoryHandleFromDB = async (projectId: string): Promise<any> 
 
 // --- Standard File System API ---
 
+const IGNORED_DIRS = new Set(['.git', 'target', 'build', '.idea', 'node_modules', '.gradle', 'bin']);
+const IGNORED_EXTENSIONS = new Set(['.jar', '.class', '.png', '.jpg', '.exe', '.dll', '.so', '.zip', '.gz']);
+
 export const getDirectoryHandle = async () => {
   if (!('showDirectoryPicker' in window)) {
     throw new Error("Seu navegador não suporta acesso direto a pastas. Use Chrome, Edge ou Opera.");
@@ -69,6 +72,59 @@ export const verifyPermission = async (fileHandle: any, readWrite: boolean = tru
   }
   
   return false;
+};
+
+export const readProjectFromDisk = async (directoryHandle: any): Promise<GeneratedProject> => {
+  const files: GeneratedFile[] = [];
+
+  const readDirRecursive = async (dirHandle: any, pathPrefix: string) => {
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind === 'file') {
+        const ext = '.' + entry.name.split('.').pop();
+        if (IGNORED_EXTENSIONS.has(ext)) continue;
+
+        try {
+          const file = await entry.getFile();
+          // Skip large files (> 1MB) to prevent context overflow
+          if (file.size > 1024 * 1024) continue;
+
+          const text = await file.text();
+          const fullPath = pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name;
+
+          let language: any = 'text';
+          if (entry.name.endsWith('.java')) language = 'java';
+          else if (entry.name.endsWith('.xml')) language = 'xml';
+          else if (entry.name.endsWith('.yml') || entry.name.endsWith('.yaml')) language = 'yaml';
+          else if (entry.name.endsWith('.json')) language = 'json';
+
+          files.push({
+            path: fullPath,
+            content: text,
+            language: language
+          });
+        } catch (e) {
+          console.warn(`Skipped file ${entry.name}`, e);
+        }
+      } else if (entry.kind === 'directory') {
+        if (IGNORED_DIRS.has(entry.name)) continue;
+        await readDirRecursive(entry, pathPrefix ? `${pathPrefix}/${entry.name}` : entry.name);
+      }
+    }
+  };
+
+  await readDirRecursive(directoryHandle, '');
+  
+  // Sort files to put pom.xml and main classes first (better for AI context)
+  files.sort((a, b) => {
+    if (a.path === 'pom.xml') return -1;
+    if (b.path === 'pom.xml') return 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  return {
+    explanation: "Projeto carregado do disco.",
+    files: files
+  };
 };
 
 export const saveProjectToDisk = async (directoryHandle: any, project: GeneratedProject) => {

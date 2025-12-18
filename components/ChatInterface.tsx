@@ -1,10 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput, Layers } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput, Layers, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generatePluginCode } from '../services/geminiService';
-import { getDirectoryHandle, saveProjectToDisk, verifyPermission } from '../services/fileSystem';
+import { getDirectoryHandle, saveProjectToDisk, verifyPermission, readProjectFromDisk } from '../services/fileSystem';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
@@ -20,14 +20,13 @@ interface ChatInterfaceProps {
 }
 
 const REASONING_STEPS = [
-  "Analisando requisitos do projeto...",
-  "Mapeando dependências do Maven...",
-  "Verificando compatibilidade com Java e Minecraft...",
-  "Estruturando pacotes e hierarquia de classes...",
-  "Implementando lógica de comandos e eventos...",
-  "Configurando plugin.yml e arquivos de recurso...",
-  "Otimizando imports e verificando sintaxe Java...",
-  "Finalizando estrutura do projeto Maven..."
+  "Lendo estrutura de arquivos atual...",
+  "Analisando contexto do projeto...",
+  "Planejando modificações no código...",
+  "Aplicando padrões de design...",
+  "Atualizando referências e imports...",
+  "Verificando consistência do Maven...",
+  "Finalizando escrita dos arquivos..."
 ];
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
@@ -47,6 +46,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [loadingText, setLoadingText] = useState('');
   const [reasoningStep, setReasoningStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const [isReading, setIsReading] = useState(false);
   const [queue, setQueue] = useState<string[]>([]);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -72,20 +72,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => clearInterval(interval);
   }, [isLoading]);
 
+  // Initial Sync when handle is available but no project loaded (e.g., page reload)
+  useEffect(() => {
+    const autoSync = async () => {
+      if (directoryHandle && !currentProject && !isReading) {
+         await syncProjectFiles(directoryHandle, false);
+      }
+    };
+    autoSync();
+  }, [directoryHandle]);
+
   // Queue Processor
   useEffect(() => {
     const processNextInQueue = async () => {
       if (isLoading || queue.length === 0) return;
 
       const nextPrompt = queue[0];
-      // Remove from queue immediately to prevent double processing
       setQueue(prev => prev.slice(1));
       
       await executeAiGeneration(nextPrompt);
     };
 
     processNextInQueue();
-  }, [queue, isLoading, currentProject]); // Depends on currentProject to chain generations correctly
+  }, [queue, isLoading, currentProject]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -95,10 +104,45 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [input]);
 
+  const syncProjectFiles = async (handle: any, notifyUser: boolean = true) => {
+    setIsReading(true);
+    try {
+      const hasPerm = await verifyPermission(handle, true);
+      if (!hasPerm) throw new Error("Permissão necessária");
+
+      const loadedProject = await readProjectFromDisk(handle);
+      onProjectGenerated(loadedProject);
+      
+      if (notifyUser && loadedProject.files.length > 0) {
+        setMessages(prev => [...prev, {
+          role: 'model',
+          text: `📁 **Sincronização Concluída**\nLi ${loadedProject.files.length} arquivos da pasta **${handle.name}**.\nEstou pronto para editar o projeto.`
+        }]);
+      } else if (notifyUser) {
+        setMessages(prev => [...prev, {
+          role: 'model',
+          text: `📁 Pasta **${handle.name}** vinculada. A pasta parece vazia. Posso criar um projeto do zero para você.`
+        }]);
+      }
+    } catch (error: any) {
+      console.error("Sync error", error);
+      if (notifyUser) {
+        setMessages(prev => [...prev, {
+           role: 'model',
+           text: `Erro ao ler arquivos: ${error.message}. Tente reconectar a pasta.`,
+           isError: true
+        }]);
+      }
+    } finally {
+      setIsReading(false);
+    }
+  };
+
   const handleSelectFolder = async () => {
     try {
       const handle = await getDirectoryHandle();
       onSetDirectoryHandle(handle);
+      await syncProjectFiles(handle, true);
       return handle;
     } catch (error: any) {
       if (error.name !== 'AbortError') {
@@ -111,7 +155,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const executeAiGeneration = async (text: string) => {
     setIsLoading(true);
     setProgress(0);
-    setLoadingText(currentProject ? 'Refatorando...' : 'Arquitetando...');
+    setLoadingText('Processando agente...');
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
@@ -126,7 +170,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       
       clearInterval(progressInterval);
       setProgress(98);
-      setLoadingText('Salvando arquivos no disco...');
+      setLoadingText('Escrevendo alterações...');
       setIsSaving(true);
 
       // Save to Disk
@@ -137,6 +181,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       await new Promise(resolve => setTimeout(resolve, 800));
       
+      // Update local state with new files (merge logic is handled by replacement for now)
+      onProjectGenerated(project);
+
       const aiMessage: ChatMessage = {
         role: 'model',
         text: project.explanation,
@@ -144,7 +191,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       };
       
       setMessages(prev => [...prev, aiMessage]);
-      onProjectGenerated(project);
+      
     } catch (error: any) {
       clearInterval(progressInterval);
       setIsSaving(false);
@@ -165,38 +212,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     let currentHandle = directoryHandle;
 
-    // 1. Mandatory Folder Selection & Permission (User Gesture Context)
     if (!currentHandle) {
-       const confirmSelect = window.confirm("Você precisa selecionar uma pasta local para onde o plugin será gerado/salvo.\n\nClique em OK para selecionar a pasta.");
+       const confirmSelect = window.confirm("Selecione a pasta do projeto (vazia ou existente) para permitir que o Agente IA gerencie os arquivos.");
        if (!confirmSelect) return;
        
        currentHandle = await handleSelectFolder();
        if (!currentHandle) return;
     }
 
+    // Verify permission before adding to queue
     try {
       const hasPermission = await verifyPermission(currentHandle, true);
       if (!hasPermission) {
-        alert("Permissão de escrita negada. O MineGen precisa de permissão para salvar os arquivos.");
-        return;
+         // Browser might prompt here
       }
-    } catch (e: any) {
-      alert("Erro ao verificar permissões: " + e.message);
-      return;
+    } catch (e) {
+      return; 
     }
 
-    // 2. Add User Message to UI Immediately
-    const userMessage: ChatMessage = { 
-      role: 'user', 
-      text: text 
-    };
+    const userMessage: ChatMessage = { role: 'user', text: text };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
-    if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto';
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    // 3. Add to Queue
     setQueue(prev => [...prev, text]);
   };
 
@@ -213,19 +251,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const handleClear = () => {
-    if (confirm("Limpar conversa deste projeto?")) {
+    if (confirm("Limpar histórico de chat? (Arquivos não serão apagados)")) {
         const defaultMsg: ChatMessage = { 
             role: 'model', 
-            text: `Histórico limpo. Como posso ajudar com o plugin ${settings.name}?` 
+            text: directoryHandle 
+              ? `Histórico limpo. Estou pronto para editar os arquivos em **${directoryHandle.name}**.` 
+              : `Histórico limpo. Selecione uma pasta para começar.` 
         };
         setMessages([defaultMsg]);
-        setQueue([]); // Clear queue too
+        setQueue([]);
     }
   };
 
   return (
     <div className="flex flex-col h-full relative z-10">
        <div className="absolute top-2 right-4 z-10 flex gap-2">
+         {directoryHandle && (
+            <button 
+              onClick={() => syncProjectFiles(directoryHandle)} 
+              title="Ler arquivos do disco novamente"
+              className={`p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700 shadow-lg ${isReading ? 'text-mc-accent animate-spin' : 'text-gray-400 hover:text-white'}`}
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+         )}
         <button onClick={handleClear} className="text-gray-400 hover:text-red-400 p-2 rounded-full transition-colors bg-mc-panel/80 backdrop-blur-sm border border-gray-700 shadow-lg"><Trash2 className="w-4 h-4" /></button>
       </div>
 
@@ -249,7 +298,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {msg.projectData && (
                   <div className="mt-3 pt-3 border-t border-gray-600/50 flex items-center justify-between text-[11px]">
                     <div className="text-mc-green font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Salvo em: {directoryHandle?.name || 'Disco'}
+                      <CheckCircle2 className="w-3.5 h-3.5" /> 
+                      {msg.text.includes("Sincronização") ? "Lido do Disco" : "Atualizado no Disco"}
                     </div>
                   </div>
                 )}
@@ -290,7 +340,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
                   <div className="bg-black/30 rounded-lg p-3 border border-gray-700/50 flex flex-col gap-2 shadow-inner">
                     <div className="flex items-center gap-2 text-[10px] font-bold text-mc-gold uppercase tracking-[0.2em] opacity-80">
-                      <BrainCircuit className="w-3 h-3" /> Pensamento Computacional
+                      <BrainCircuit className="w-3 h-3" /> Agente Ativo
                     </div>
                     <div className="flex items-start gap-2 min-h-[30px]">
                       <TerminalIcon className="w-3 h-3 text-gray-500 mt-0.5 shrink-0" />
@@ -306,15 +356,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         </motion.span>
                       </AnimatePresence>
                     </div>
-                    
-                    {queue.length > 0 && (
-                      <div className="flex items-center gap-2 border-t border-gray-700/50 pt-2 mt-1">
-                         <Layers className="w-3 h-3 text-mc-accent" />
-                         <span className="text-[10px] text-gray-400 font-mono">
-                           +{queue.length} mensagem(ns) na fila de processamento
-                         </span>
-                      </div>
-                    )}
                   </div>
               </div>
             </div>
@@ -331,11 +372,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder={directoryHandle ? (queue.length > 0 ? "Adicionar à fila..." : (currentProject ? "Diga o que quer alterar..." : "Descreva seu novo plugin...")) : "Digite para Selecionar a Pasta de Destino..."} 
+            placeholder={directoryHandle ? (queue.length > 0 ? "Adicionar à fila..." : "Instrua o Agente a alterar, corrigir ou criar...") : "Clique aqui para selecionar a pasta do projeto..."} 
             className={`w-full bg-[#2B2D31]/95 backdrop-blur-md text-white border ${!directoryHandle ? 'border-mc-gold/50 shadow-[0_0_15px_rgba(255,170,0,0.1)]' : 'border-gray-600'} rounded-xl pl-4 pr-12 py-4 shadow-2xl focus:outline-none focus:border-mc-accent transition-all text-sm group-hover:border-gray-500 resize-none custom-scrollbar`}
             style={{ minHeight: '54px', maxHeight: '200px' }} 
           />
-          <button type="submit" disabled={!input.trim()} className="absolute right-2 bottom-3 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95 h-9">
+          <button type="submit" disabled={!input.trim() && !!directoryHandle} className="absolute right-2 bottom-3 bg-mc-accent hover:bg-blue-600 text-white rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 flex items-center justify-center active:scale-95 h-9">
              {!directoryHandle ? <FolderInput className="w-5 h-5" /> : (isLoading ? <Layers className="w-5 h-5" /> : <Send className="w-5 h-5" />)}
           </button>
         </form>
