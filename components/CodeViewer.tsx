@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
 import { FileCode, Save, Check, FolderOpen, RefreshCw, HardDrive, File, MoreVertical, X, MessageSquarePlus, TerminalSquare, ArrowRight } from 'lucide-react';
-import { saveFileToDisk } from '../services/fileSystem';
+import { saveFileToDisk, verifyPermission } from '../services/fileSystem';
 
 interface CodeViewerProps {
   project: GeneratedProject | null;
@@ -56,8 +56,13 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
 
   const handleSave = async () => {
     if (!selectedFile || !directoryHandle) return;
-    setIsSaving(true);
+    
     try {
+        // Ensure permission before saving (needs user gesture)
+        const hasPerm = await verifyPermission(directoryHandle, true);
+        if (!hasPerm) return;
+
+        setIsSaving(true);
         await saveFileToDisk(directoryHandle, selectedFile.path, fileContent);
         selectedFile.content = fileContent; 
         setIsDirty(false);

@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { getDirectoryHandle, saveProjectToDisk, verifyPermission, readProjectFromDisk } from '../services/fileSystem';
 
@@ -49,6 +49,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isReading, setIsReading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [queue, setQueue] = useState<{text: string, att: Attachment[]}[]>([]);
+  const [needsPermission, setNeedsPermission] = useState(false);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -74,15 +75,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  // Initial Sync
+  // Initial Sync Logic with Permission Check
   useEffect(() => {
-    const autoSync = async () => {
+    const checkAndSync = async () => {
       if (directoryHandle && !currentProject && !isReading) {
-         await syncProjectFiles(directoryHandle, false);
+          // Check permission state first without requesting (requesting requires user gesture)
+          try {
+             const opts = { mode: 'readwrite' };
+             // @ts-ignore - queryPermission is valid on FileSystemHandle
+             const status = await directoryHandle.queryPermission(opts);
+             
+             if (status === 'granted') {
+                 setNeedsPermission(false);
+                 await syncProjectFiles(directoryHandle, false);
+             } else {
+                 setNeedsPermission(true);
+             }
+          } catch (e) {
+             console.warn("Could not query permissions", e);
+             setNeedsPermission(true);
+          }
       }
     };
-    autoSync();
-  }, [directoryHandle]);
+    checkAndSync();
+  }, [directoryHandle, currentProject]);
 
   // Watch for external pending messages (From CodeViewer)
   useEffect(() => {
@@ -113,12 +129,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [input]);
 
+  const handleAuthorize = async () => {
+      if (!directoryHandle) return;
+      // This is called via click, so verifyPermission (which calls requestPermission) is allowed
+      const hasPerm = await verifyPermission(directoryHandle, true);
+      if (hasPerm) {
+          setNeedsPermission(false);
+          await syncProjectFiles(directoryHandle, true);
+      }
+  };
+
   const syncProjectFiles = async (handle: any, notifyUser: boolean = true) => {
     setIsReading(true);
     try {
-      const hasPerm = await verifyPermission(handle, true);
-      if (!hasPerm) throw new Error("Permissão necessária");
-
+      // NOTE: requestPermission must be called in a gesture. 
+      // syncProjectFiles is now safe to call if we know permission is granted OR if called from a button click.
       const loadedProject = await readProjectFromDisk(handle);
       onProjectGenerated(loadedProject);
       
@@ -129,10 +154,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         }]);
       }
     } catch (error: any) {
+      console.error("Sync error", error);
       if (notifyUser) {
         setMessages(prev => [...prev, {
            role: 'model',
-           text: `Erro ao ler arquivos: ${error.message}.`,
+           text: `Erro ao ler arquivos: ${error.message}. (Talvez falte permissão?)`,
            isError: true
         }]);
       }
@@ -145,6 +171,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       const handle = await getDirectoryHandle();
       onSetDirectoryHandle(handle);
+      setNeedsPermission(false);
+      // New handle implies granted permission usually
       await syncProjectFiles(handle, true);
       return handle;
     } catch (error: any) {
@@ -173,6 +201,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setLoadingText('Escrevendo alterações...');
       setIsSaving(true);
 
+      // Verify permission one last time before saving (although queue should imply it, better safe)
+      // Note: We cannot request permission here (async), so we assume it was handled via the authorize button
       await saveProjectToDisk(directoryHandle, project);
       
       setIsSaving(false);
@@ -193,9 +223,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     } catch (error: any) {
       clearInterval(progressInterval);
       setIsSaving(false);
+      let errMsg = error.message || "Falha crítica.";
+      if (errMsg.includes("not allowed by the user agent")) {
+          errMsg = "Erro de Permissão: O navegador bloqueou o acesso aos arquivos. Por favor, clique no botão 'Autorizar Acesso' acima ou re-selecione a pasta.";
+          setNeedsPermission(true);
+      }
+
       setMessages(prev => [...prev, {
         role: 'model',
-        text: error.message || "Falha crítica.",
+        text: errMsg,
         isError: true
       }]);
     } finally {
@@ -254,6 +290,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
        if (!currentHandle) return;
     }
 
+    if (needsPermission) {
+        alert("Por favor, autorize o acesso à pasta clicando no botão 'Autorizar Acesso' antes de enviar comandos.");
+        return;
+    }
+
     const userMessage: ChatMessage = { 
         role: 'user', 
         text: text,
@@ -282,11 +323,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   return (
     <div className="flex flex-col h-full relative z-10 bg-[#1e1e1e]">
+       {/* Toolbar Header */}
        <div className="absolute top-2 right-4 z-10 flex gap-2">
          {directoryHandle && (
             <button 
-              onClick={() => syncProjectFiles(directoryHandle)} 
-              title="Ler arquivos do disco"
+              onClick={() => handleAuthorize()} // Use handleAuthorize to cover re-sync
+              title="Sincronizar arquivos do disco"
               className={`p-2 rounded-md hover:bg-[#333] transition-colors ${isReading ? 'text-blue-400 animate-spin' : 'text-gray-400'}`}
             >
               <RefreshCw className="w-4 h-4" />
@@ -294,6 +336,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
          )}
         <button onClick={() => setMessages([])} className="text-gray-400 hover:text-red-400 p-2 rounded-md hover:bg-[#333] transition-colors"><Trash2 className="w-4 h-4" /></button>
       </div>
+      
+      {/* Permission Banner */}
+      {needsPermission && directoryHandle && (
+          <div className="bg-blue-900/40 border-b border-blue-500/30 p-3 flex items-center justify-between animate-fade-in shrink-0">
+              <div className="flex items-center gap-2 text-sm text-blue-200">
+                  <Lock className="w-4 h-4 text-blue-400" />
+                  <span>Acesso à pasta <strong>{directoryHandle.name}</strong> requer confirmação.</span>
+              </div>
+              <button 
+                  onClick={handleAuthorize}
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-1.5 px-3 rounded shadow-sm transition-colors"
+              >
+                  Autorizar Acesso
+              </button>
+          </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24 custom-scrollbar">
         {messages.map((msg, idx) => (
