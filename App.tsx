@@ -324,6 +324,7 @@ const App: React.FC = () => {
             isOpen={isTerminalOpen} 
             onClose={() => setIsTerminalOpen(false)} 
             onClear={() => setTerminalLogs([])}
+            onAddLog={addLog}
           />
         </div>
       </div>
