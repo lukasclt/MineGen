@@ -128,18 +128,48 @@ ${agentCapabilities}
   };
 
   const executeCall = async (payload: any[]) => {
-    const completion = await client.chat.completions.create({
-      model: model,
-      messages: [
-        { role: "system", content: SYSTEM_INSTRUCTION },
-        { role: "user", content: payload }
-      ],
-      response_format: { type: "json_object" }
-    });
+    let attempts = 0;
+    const maxAttempts = 3;
+    let currentBackoff = 2000; // Começa com 2 segundos
 
-    const text = completion.choices[0]?.message?.content;
-    if (!text) throw new Error("Sem resposta da IA");
-    return parseJSON(text);
+    while (attempts < maxAttempts) {
+      try {
+        const completion = await client.chat.completions.create({
+          model: model,
+          messages: [
+            { role: "system", content: SYSTEM_INSTRUCTION },
+            { role: "user", content: payload }
+          ],
+          response_format: { type: "json_object" }
+        });
+
+        const text = completion.choices[0]?.message?.content;
+        if (!text) throw new Error("Sem resposta da IA");
+        return parseJSON(text);
+
+      } catch (error: any) {
+        // Log para debug
+        console.warn(`Tentativa ${attempts + 1} falhou:`, error.message);
+
+        // Se for erro 429 (Rate Limit) ou erro de servidor temporário (5xx), tenta de novo
+        const isRetryable = error.status === 429 || (error.message && error.message.includes('429')) || (error.status >= 500 && error.status < 600);
+        
+        if (isRetryable) {
+          attempts++;
+          if (attempts >= maxAttempts) {
+             throw new Error("O servidor da IA está muito ocupado (Erro 429/5xx) após várias tentativas. Tente novamente em alguns instantes.");
+          }
+          
+          console.log(`Aguardando ${currentBackoff}ms antes de tentar novamente...`);
+          await new Promise(resolve => setTimeout(resolve, currentBackoff));
+          currentBackoff *= 2; // Backoff exponencial
+          continue;
+        }
+        
+        // Se não for erro de rate limit, lança imediatamente
+        throw error;
+      }
+    }
   };
 
   try {
@@ -147,8 +177,11 @@ ${agentCapabilities}
     return await executeCall(buildPayload(false));
   } catch (error: any) {
     // Se o erro for de suporte a imagem ou 404 (endpoint not found for images)
-    if (error.status === 404 || error.status === 400 || error.message.toLowerCase().includes('image')) {
-      console.log("Modelo não suporta imagem, tentando OCR fallback...");
+    // Nota: O erro 429 já foi tratado dentro do executeCall, aqui tratamos erros de CAPACIDADE do modelo (ex: não suporta img)
+    const isImageError = error.status === 404 || error.status === 400 || (error.message && error.message.toLowerCase().includes('image'));
+
+    if (isImageError) {
+      console.log("Modelo não suporta imagem ou endpoint inválido, tentando OCR fallback...");
       
       // Tentativa 2: Extrair texto (OCR) e enviar como texto
       const ocrResult = await performOCR(attachments);
