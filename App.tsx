@@ -6,6 +6,7 @@ import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage } from './types';
 import { DEFAULT_SETTINGS } from './constants';
+import { saveDirectoryHandleToDB, getDirectoryHandleFromDB } from './services/fileSystem';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -22,7 +23,7 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
-  // File System State (Runtime only, not saved in localStorage due to security)
+  // File System State (Persistent via IndexedDB)
   const [directoryHandle, setDirectoryHandle] = useState<any>(null);
 
   // Computed Current Project
@@ -67,10 +68,34 @@ const App: React.FC = () => {
     }
   }, [currentProjectId, isLoaded]);
 
-  // Reset folder handle when project changes (optional, keeps strict separate folders)
+  // Load Directory Handle from IndexedDB when project changes
   useEffect(() => {
-    setDirectoryHandle(null);
+    const loadHandle = async () => {
+      setDirectoryHandle(null); // Reset first
+      if (currentProjectId) {
+        try {
+          const savedHandle = await getDirectoryHandleFromDB(currentProjectId);
+          if (savedHandle) {
+            setDirectoryHandle(savedHandle);
+          }
+        } catch (error) {
+          console.error("Error loading directory handle:", error);
+        }
+      }
+    };
+    loadHandle();
   }, [currentProjectId]);
+
+  const handleSetDirectoryHandle = async (handle: any) => {
+    setDirectoryHandle(handle);
+    if (currentProjectId && handle) {
+      try {
+        await saveDirectoryHandleToDB(currentProjectId, handle);
+      } catch (error) {
+        console.error("Failed to save handle to DB:", error);
+      }
+    }
+  };
 
   const createNewProject = () => {
     const newProject: SavedProject = {
@@ -185,7 +210,7 @@ const App: React.FC = () => {
               onUpdateProjectName={(name) => updateActiveProject({ name })}
               // File System Props
               directoryHandle={directoryHandle}
-              onSetDirectoryHandle={setDirectoryHandle}
+              onSetDirectoryHandle={handleSetDirectoryHandle}
             />
           )}
         </div>

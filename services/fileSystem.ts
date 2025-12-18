@@ -1,6 +1,52 @@
 
 import { GeneratedProject } from "../types";
 
+// --- IndexedDB Configuration ---
+const DB_NAME = 'MineGenDB';
+const STORE_NAME = 'projectHandles';
+
+const openDB = (): Promise<IDBDatabase> => {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+export const saveDirectoryHandleToDB = async (projectId: string, handle: any) => {
+  const db = await openDB();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.put(handle, projectId);
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+};
+
+export const getDirectoryHandleFromDB = async (projectId: string): Promise<any> => {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readonly');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(projectId);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+};
+
+// --- Standard File System API ---
+
 export const getDirectoryHandle = async () => {
   if (!('showDirectoryPicker' in window)) {
     throw new Error("Seu navegador não suporta acesso direto a pastas. Use Chrome, Edge ou Opera.");
