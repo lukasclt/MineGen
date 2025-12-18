@@ -22,8 +22,8 @@ const parseJSON = (text: string) => {
     const cleaned = text.replace(/^```json\s*/, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
     return JSON.parse(cleaned);
   } catch (e) {
-    console.error("Failed to parse JSON:", text);
-    throw new Error("A IA retornou um formato inválido. Tente novamente.");
+    console.error("Failed to parse JSON. Raw text received:", text);
+    throw new Error(`A IA retornou um formato inválido. Log bruto no console.\n\nTrecho: ${text.substring(0, 200)}...`);
   }
 };
 

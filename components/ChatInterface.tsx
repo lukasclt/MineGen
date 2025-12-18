@@ -1,8 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, BrainCircuit, Terminal as TerminalIcon, Loader2, CheckCircle2, FolderInput, Layers, RefreshCw, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { getDirectoryHandle, saveProjectToDisk, verifyPermission, readProjectFromDisk } from '../services/fileSystem';
 
@@ -16,6 +15,8 @@ interface ChatInterfaceProps {
   onUpdateProjectName: (name: string) => void;
   directoryHandle: any;
   onSetDirectoryHandle: (handle: any) => void;
+  pendingMessage?: string | null;
+  onClearPendingMessage?: () => void;
 }
 
 const REASONING_STEPS = [
@@ -35,7 +36,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   currentProject, 
   onProjectGenerated, 
   directoryHandle,
-  onSetDirectoryHandle
+  onSetDirectoryHandle,
+  pendingMessage,
+  onClearPendingMessage
 }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -80,6 +83,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     };
     autoSync();
   }, [directoryHandle]);
+
+  // Watch for external pending messages (From CodeViewer)
+  useEffect(() => {
+    if (pendingMessage) {
+        handleAddToQueue(pendingMessage);
+        if (onClearPendingMessage) onClearPendingMessage();
+    }
+  }, [pendingMessage]);
 
   // Queue Processor
   useEffect(() => {
@@ -236,6 +247,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     let currentHandle = directoryHandle;
 
     if (!currentHandle) {
+       // Se veio via prompt do CodeViewer, talvez já tenha handle, mas se não tiver:
        const confirmSelect = window.confirm("Selecione a pasta do projeto para permitir que o Agente IA gerencie os arquivos.");
        if (!confirmSelect) return;
        currentHandle = await handleSelectFolder();

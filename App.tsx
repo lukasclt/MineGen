@@ -31,6 +31,9 @@ const App: React.FC = () => {
   const [isTerminalOpen, setIsTerminalOpen] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
 
+  // AI Trigger State (Bridge between CodeViewer and ChatInterface)
+  const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
+
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
 
@@ -234,13 +237,12 @@ const App: React.FC = () => {
     addLog("Sistema: Projeto atualizado com sucesso.");
   };
 
-  // Call from CodeViewer
+  // Trigger from CodeViewer
   const handleAddToContext = (fullMessage: string) => {
-     addLog("Usuário: Instrução de código enviada.");
-     handleMessagesUpdate(prev => [...prev, {
-       role: 'user',
-       text: fullMessage
-     }]);
+     addLog("Usuário: Instrução enviada para processamento pelo Agente.");
+     // Não atualizamos as mensagens aqui diretamente, deixamos o ChatInterface fazer isso
+     // ao processar a "pendingAiMessage", garantindo que entre na fila de execução.
+     setPendingAiMessage(fullMessage);
   };
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
@@ -288,6 +290,8 @@ const App: React.FC = () => {
               onUpdateProjectName={(name) => updateActiveProject({ name })}
               directoryHandle={directoryHandle}
               onSetDirectoryHandle={handleSetDirectoryHandle}
+              pendingMessage={pendingAiMessage}
+              onClearPendingMessage={() => setPendingAiMessage(null)}
             />
           ) : (
              <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">
