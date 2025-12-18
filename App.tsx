@@ -4,7 +4,7 @@ import { Menu } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
-import { PluginSettings, GeneratedProject, SavedProject, ChatMessage } from './types';
+import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk } from './services/fileSystem';
 
@@ -42,9 +42,6 @@ const App: React.FC = () => {
           setCurrentProjectId(savedLastId);
         } else if (parsedProjects.length > 0) {
           setCurrentProjectId(parsedProjects[0].id);
-        } else {
-          // Do not automatically create a project on load if none exist, 
-          // let the user click "New Project" to handle the folder flow correctly.
         }
       } 
     } catch (e) {
@@ -97,17 +94,14 @@ const App: React.FC = () => {
 
   const handleCreateNewProject = async () => {
     try {
-      // 1. Force folder selection immediately
       const handle = await getDirectoryHandle();
-      if (!handle) return; // User cancelled
+      if (!handle) return; 
 
-      // 2. Read existing files
       const loadedProject = await readProjectFromDisk(handle);
       const hasFiles = loadedProject.files.length > 0;
       
       const newId = generateUUID();
       
-      // 3. Create Project State
       const newProject: SavedProject = {
         id: newId,
         name: handle.name || "Novo Projeto",
@@ -116,17 +110,15 @@ const App: React.FC = () => {
         messages: [{
           role: 'model',
           text: hasFiles 
-            ? `📁 Pasta **${handle.name}** vinculada com sucesso!\nEncontrei ${loadedProject.files.length} arquivos.\nComo posso ajudar a editar este projeto?`
+            ? `📁 Pasta **${handle.name}** vinculada!\nEncontrei ${loadedProject.files.length} arquivos.\nComo posso ajudar?`
             : `📁 Pasta **${handle.name}** vinculada (Vazia).\nO que você gostaria de criar hoje?`
         }],
         generatedProject: hasFiles ? loadedProject : null
       };
 
-      // 4. Update State and DB
       setProjects(prev => [newProject, ...prev]);
       setCurrentProjectId(newProject.id);
       
-      // Save the handle immediately
       setDirectoryHandle(handle);
       await saveDirectoryHandleToDB(newId, handle);
 
@@ -178,21 +170,56 @@ const App: React.FC = () => {
     }));
   };
 
+  // Lógica crítica: Mesclar arquivos novos com os existentes
   const handleProjectGenerated = (generated: GeneratedProject) => {
-    updateActiveProject({ generatedProject: generated });
+    if (!activeProject) return;
+
+    let mergedFiles: GeneratedFile[] = [];
+
+    if (activeProject.generatedProject?.files) {
+      mergedFiles = [...activeProject.generatedProject.files];
+      
+      // Update or add new files
+      generated.files.forEach(newFile => {
+        const existingIndex = mergedFiles.findIndex(f => f.path === newFile.path);
+        if (existingIndex !== -1) {
+          mergedFiles[existingIndex] = newFile;
+        } else {
+          mergedFiles.push(newFile);
+        }
+      });
+    } else {
+      mergedFiles = generated.files;
+    }
+
+    // Re-ordenar
+    mergedFiles.sort((a, b) => {
+      if (a.path === 'pom.xml' || a.path === 'build.gradle') return -1;
+      return a.path.localeCompare(b.path);
+    });
+
+    updateActiveProject({ 
+      generatedProject: {
+        ...generated,
+        files: mergedFiles
+      } 
+    });
+  };
+
+  // Call from Context Menu
+  const handleAddToContext = (text: string) => {
+     handleMessagesUpdate(prev => [...prev, {
+       role: 'user',
+       text: `[Contexto Adicionado do Editor]:\n\`\`\`\n${text}\n\`\`\``
+     }]);
   };
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
-  if (!isLoaded) return <div className="bg-mc-dark h-screen w-full flex items-center justify-center text-gray-500">Loading workspace...</div>;
+  if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Loading workspace...</div>;
 
   return (
-    <div className="flex h-screen w-full bg-mc-dark text-white overflow-hidden font-sans relative">
-      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute inset-0 bg-grid-animate opacity-30"></div>
-        <div className="absolute inset-0 bg-radial-gradient"></div>
-      </div>
-
+    <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
       )}
@@ -210,16 +237,16 @@ const App: React.FC = () => {
       />
 
       <div className="flex-1 flex flex-col md:flex-row h-full relative z-10">
-        <div className="md:hidden h-14 border-b border-gray-700 flex items-center px-4 bg-mc-panel z-10 flex-shrink-0 justify-between">
+        <div className="md:hidden h-12 border-b border-[#2b2b2b] flex items-center px-4 bg-[#252526] z-10 flex-shrink-0 justify-between">
           <div className="flex items-center">
             <button onClick={toggleSidebar} className="text-gray-300 mr-3">
-              <Menu className="w-6 h-6" />
+              <Menu className="w-5 h-5" />
             </button>
-            <span className="font-bold text-white truncate max-w-[200px]">{activeProject?.name || "MineGen AI"}</span>
+            <span className="font-semibold text-white truncate max-w-[200px]">{activeProject?.name || "MineGen AI"}</span>
           </div>
         </div>
 
-        <div className="flex-1 md:w-[40%] md:flex-none border-r border-gray-800 h-full overflow-hidden bg-mc-dark/50 backdrop-blur-sm">
+        <div className="flex-1 md:w-[35%] md:flex-none border-r border-[#2b2b2b] h-full overflow-hidden bg-[#1e1e1e]">
           {activeProject ? (
             <ChatInterface 
               key={activeProject.id}
@@ -230,32 +257,24 @@ const App: React.FC = () => {
               onProjectGenerated={handleProjectGenerated}
               onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
               onUpdateProjectName={(name) => updateActiveProject({ name })}
-              // File System Props
               directoryHandle={directoryHandle}
               onSetDirectoryHandle={handleSetDirectoryHandle}
             />
           ) : (
-             <div className="flex flex-col items-center justify-center h-full text-gray-400 p-8 text-center space-y-4">
-                <div className="w-16 h-16 bg-mc-panel rounded-full flex items-center justify-center mb-2 shadow-lg border border-gray-700">
-                    <Menu className="w-8 h-8 text-mc-accent" />
-                </div>
-                <h2 className="text-xl font-bold text-white">Bem-vindo ao MineGen AI</h2>
-                <p className="max-w-md">Selecione um projeto existente na barra lateral ou clique em "Novo Projeto" para começar a editar ou criar plugins.</p>
-                <button 
-                  onClick={handleCreateNewProject}
-                  className="bg-mc-accent hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow-lg transition-transform active:scale-95"
-                >
-                  Selecionar Pasta & Criar Projeto
-                </button>
+             <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">
+                <Menu className="w-12 h-12 opacity-20" />
+                <h2 className="text-lg font-medium text-[#cccccc]">Sem projeto aberto</h2>
+                <button onClick={handleCreateNewProject} className="bg-[#007acc] text-white px-4 py-2 rounded shadow-sm hover:bg-[#0062a3] text-sm">Abrir Pasta</button>
              </div>
           )}
         </div>
 
-        <div className="hidden md:flex flex-1 md:w-[60%] h-full overflow-hidden shadow-2xl">
+        <div className="hidden md:flex flex-1 md:w-[65%] h-full overflow-hidden bg-[#1e1e1e]">
           <CodeViewer 
             project={activeProject?.generatedProject || null} 
             settings={activeProject?.settings || DEFAULT_SETTINGS}
             directoryHandle={directoryHandle}
+            onAddToContext={handleAddToContext}
           />
         </div>
       </div>

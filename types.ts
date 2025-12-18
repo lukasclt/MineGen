@@ -50,10 +50,17 @@ export interface GeneratedProject {
   files: GeneratedFile[];
 }
 
+export interface Attachment {
+  type: 'image' | 'text';
+  content: string; // Base64 para imagem, string crua para texto
+  name: string;
+}
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
-  projectData?: GeneratedProject; // Only model messages might have this
+  attachments?: Attachment[];
+  projectData?: GeneratedProject; 
   isError?: boolean;
 }
 

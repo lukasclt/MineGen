@@ -96,6 +96,7 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
           else if (entry.name.endsWith('.xml')) language = 'xml';
           else if (entry.name.endsWith('.yml') || entry.name.endsWith('.yaml')) language = 'yaml';
           else if (entry.name.endsWith('.json')) language = 'json';
+          else if (entry.name.endsWith('.gradle')) language = 'gradle';
 
           files.push({
             path: fullPath,
@@ -116,8 +117,8 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
   
   // Sort files to put pom.xml and main classes first (better for AI context)
   files.sort((a, b) => {
-    if (a.path === 'pom.xml') return -1;
-    if (b.path === 'pom.xml') return 1;
+    if (a.path === 'pom.xml' || a.path === 'build.gradle') return -1;
+    if (b.path === 'pom.xml' || b.path === 'build.gradle') return 1;
     return a.path.localeCompare(b.path);
   });
 
@@ -127,28 +128,33 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
   };
 };
 
+export const saveFileToDisk = async (directoryHandle: any, path: string, content: string) => {
+  if (!directoryHandle) throw new Error("Sem diretório vinculado.");
+
+  const parts = path.split('/');
+  const fileName = parts.pop();
+  const directories = parts;
+
+  let currentDirHandle = directoryHandle;
+
+  // Navigate or create directories recursively
+  for (const dir of directories) {
+    if (dir === '.' || dir === '') continue;
+    currentDirHandle = await currentDirHandle.getDirectoryHandle(dir, { create: true });
+  }
+
+  if (fileName) {
+    const fileHandle = await currentDirHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+  }
+};
+
 export const saveProjectToDisk = async (directoryHandle: any, project: GeneratedProject) => {
   if (!directoryHandle) return;
 
   for (const file of project.files) {
-    const parts = file.path.split('/');
-    const fileName = parts.pop();
-    const directories = parts;
-
-    let currentDirHandle = directoryHandle;
-
-    // Navigate or create directories recursively
-    for (const dir of directories) {
-      if (dir === '.' || dir === '') continue;
-      currentDirHandle = await currentDirHandle.getDirectoryHandle(dir, { create: true });
-    }
-
-    // Create and write file
-    if (fileName) {
-      const fileHandle = await currentDirHandle.getFileHandle(fileName, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(file.content);
-      await writable.close();
-    }
+    await saveFileToDisk(directoryHandle, file.path, file.content);
   }
 };

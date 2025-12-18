@@ -1,6 +1,6 @@
 
 import OpenAI from 'openai';
-import { PluginSettings, GeneratedProject } from "../types";
+import { PluginSettings, GeneratedProject, Attachment } from "../types";
 import { SYSTEM_INSTRUCTION } from "../constants";
 
 const client = new OpenAI({
@@ -30,10 +30,19 @@ const parseJSON = (text: string) => {
 export const generatePluginCode = async (
   prompt: string, 
   settings: PluginSettings,
-  previousProject?: GeneratedProject | null
+  previousProject?: GeneratedProject | null,
+  attachments: Attachment[] = []
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
   let userPromptContext = "";
+
+  // Instruções adicionais para links e imagens
+  const agentCapabilities = `
+# CAPACIDADES EXTRAS
+1. **Links (Web/YouTube):** Se o usuário enviar links (YouTube, Docs), use seu conhecimento prévio sobre o assunto ou infira o contexto pelo título/descrição fornecida pelo usuário. Se for um tutorial, tente implementar a lógica descrita.
+2. **Imagens:** Se o usuário enviou imagens, use-as como referência visual (ex: layouts de GUI, logs de erro, diagramas).
+3. **Arquivos de Texto:** Arquivos anexados devem ser tratados como parte do código ou documentação a ser analisada.
+  `;
 
   if (previousProject && previousProject.files.length > 0) {
     const fileContext = previousProject.files.map(f => `--- FILE: ${f.path} ---\n${f.content}`).join("\n\n");
@@ -52,6 +61,7 @@ ${prompt}
 1. Mantenha a integridade de todas as classes.
 2. Atualize o arquivo de build (${settings.buildSystem === 'Gradle' ? 'build.gradle' : 'pom.xml'}) se novas dependências forem necessárias.
 3. Garanta que o código siga os padrões da API selecionada.
+${agentCapabilities}
     `;
   } else {
     userPromptContext = `
@@ -65,7 +75,27 @@ Sistema de Build: ${settings.buildSystem}
 
 # SOLICITAÇÃO
 ${prompt}
+${agentCapabilities}
     `;
+  }
+
+  // Montar payload com anexos
+  const contentPayload: any[] = [{ type: "text", text: userPromptContext }];
+
+  for (const att of attachments) {
+    if (att.type === 'image') {
+      contentPayload.push({
+        type: "image_url",
+        image_url: {
+          url: att.content // Deve ser data:image/... base64
+        }
+      });
+    } else if (att.type === 'text') {
+      contentPayload.push({
+        type: "text",
+        text: `\n--- ANEXO: ${att.name} ---\n${att.content}\n----------------\n`
+      });
+    }
   }
 
   try {
@@ -73,7 +103,7 @@ ${prompt}
       model: model,
       messages: [
         { role: "system", content: SYSTEM_INSTRUCTION },
-        { role: "user", content: userPromptContext }
+        { role: "user", content: contentPayload }
       ],
       response_format: { type: "json_object" }
     });
