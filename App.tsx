@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Menu } from 'lucide-react';
+import { Menu, TerminalSquare } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
+import Terminal from './components/Terminal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk } from './services/fileSystem';
@@ -26,8 +27,16 @@ const App: React.FC = () => {
   // File System State (Persistent via IndexedDB)
   const [directoryHandle, setDirectoryHandle] = useState<any>(null);
 
+  // Terminal State
+  const [isTerminalOpen, setIsTerminalOpen] = useState(true);
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
+
+  const addLog = (message: string) => {
+    setTerminalLogs(prev => [...prev, message]);
+  };
 
   useEffect(() => {
     try {
@@ -72,9 +81,11 @@ const App: React.FC = () => {
           const savedHandle = await getDirectoryHandleFromDB(currentProjectId);
           if (savedHandle) {
             setDirectoryHandle(savedHandle);
+            addLog(`Sistema: Manipulador de diretório carregado para projeto ${currentProjectId.substring(0,8)}`);
           }
         } catch (error) {
           console.error("Error loading directory handle:", error);
+          addLog("Erro: Falha ao carregar manipulador de diretório do DB");
         }
       }
     };
@@ -83,6 +94,7 @@ const App: React.FC = () => {
 
   const handleSetDirectoryHandle = async (handle: any) => {
     setDirectoryHandle(handle);
+    addLog(`Sistema: Diretório "${handle.name}" vinculado com sucesso.`);
     if (currentProjectId && handle) {
       try {
         await saveDirectoryHandleToDB(currentProjectId, handle);
@@ -97,8 +109,10 @@ const App: React.FC = () => {
       const handle = await getDirectoryHandle();
       if (!handle) return; 
 
+      addLog(`Sistema: Lendo diretório "${handle.name}"...`);
       const loadedProject = await readProjectFromDisk(handle);
       const hasFiles = loadedProject.files.length > 0;
+      addLog(`Sistema: ${loadedProject.files.length} arquivos encontrados.`);
       
       const newId = generateUUID();
       
@@ -127,6 +141,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       if (error.name !== 'AbortError') {
         alert("Erro ao criar projeto: " + error.message);
+        addLog(`Erro: ${error.message}`);
       }
     }
   };
@@ -139,6 +154,7 @@ const App: React.FC = () => {
       if (newProjects.length > 0) setCurrentProjectId(newProjects[0].id);
       else setCurrentProjectId(null);
     }
+    addLog("Sistema: Projeto excluído.");
   };
 
   const updateActiveProject = useCallback((updates: Partial<SavedProject>) => {
@@ -164,6 +180,12 @@ const App: React.FC = () => {
           ? newMessagesOrUpdater(currentMessages)
           : newMessagesOrUpdater;
         
+        // Simples log da última mensagem do usuário (se houver)
+        const lastMsg = updatedMessages[updatedMessages.length - 1];
+        if (lastMsg && lastMsg.role === 'model') {
+             addLog("AI: Resposta gerada.");
+        }
+
         return { ...p, messages: updatedMessages, lastModified: Date.now() };
       }
       return p;
@@ -173,6 +195,8 @@ const App: React.FC = () => {
   // Lógica crítica: Mesclar arquivos novos com os existentes
   const handleProjectGenerated = (generated: GeneratedProject) => {
     if (!activeProject) return;
+
+    addLog(`Sistema: Atualizando ${generated.files.length} arquivos no projeto...`);
 
     let mergedFiles: GeneratedFile[] = [];
 
@@ -184,8 +208,10 @@ const App: React.FC = () => {
         const existingIndex = mergedFiles.findIndex(f => f.path === newFile.path);
         if (existingIndex !== -1) {
           mergedFiles[existingIndex] = newFile;
+          addLog(`Arquivo atualizado: ${newFile.path}`);
         } else {
           mergedFiles.push(newFile);
+          addLog(`Arquivo criado: ${newFile.path}`);
         }
       });
     } else {
@@ -204,10 +230,13 @@ const App: React.FC = () => {
         files: mergedFiles
       } 
     });
+    
+    addLog("Sistema: Projeto atualizado com sucesso.");
   };
 
   // Call from Context Menu
   const handleAddToContext = (text: string) => {
+     addLog("Usuário: Código enviado para contexto do chat.");
      handleMessagesUpdate(prev => [...prev, {
        role: 'user',
        text: `[Contexto Adicionado do Editor]:\n\`\`\`\n${text}\n\`\`\``
@@ -229,14 +258,14 @@ const App: React.FC = () => {
         toggleSidebar={toggleSidebar}
         projects={projects}
         currentProjectId={currentProjectId}
-        onSelectProject={(id) => { setCurrentProjectId(id); }}
+        onSelectProject={(id) => { setCurrentProjectId(id); addLog(`Sistema: Projeto trocado para ID ${id.substring(0,8)}`); }}
         onCreateProject={handleCreateNewProject}
         onDeleteProject={deleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
         setSettings={handleSettingsChange}
       />
 
-      <div className="flex-1 flex flex-col md:flex-row h-full relative z-10">
+      <div className="flex-1 flex flex-col md:flex-row h-full relative z-10 overflow-hidden">
         <div className="md:hidden h-12 border-b border-[#2b2b2b] flex items-center px-4 bg-[#252526] z-10 flex-shrink-0 justify-between">
           <div className="flex items-center">
             <button onClick={toggleSidebar} className="text-gray-300 mr-3">
@@ -246,7 +275,7 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex-1 md:w-[35%] md:flex-none border-r border-[#2b2b2b] h-full overflow-hidden bg-[#1e1e1e]">
+        <div className="flex-1 md:w-[35%] md:flex-none border-r border-[#2b2b2b] h-full overflow-hidden bg-[#1e1e1e] flex flex-col">
           {activeProject ? (
             <ChatInterface 
               key={activeProject.id}
@@ -269,12 +298,32 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="hidden md:flex flex-1 md:w-[65%] h-full overflow-hidden bg-[#1e1e1e]">
-          <CodeViewer 
-            project={activeProject?.generatedProject || null} 
-            settings={activeProject?.settings || DEFAULT_SETTINGS}
-            directoryHandle={directoryHandle}
-            onAddToContext={handleAddToContext}
+        {/* Right Area: CodeViewer + Terminal */}
+        <div className="hidden md:flex flex-1 md:w-[65%] h-full overflow-hidden bg-[#1e1e1e] flex-col relative">
+          <div className="flex-1 overflow-hidden relative">
+             <CodeViewer 
+              project={activeProject?.generatedProject || null} 
+              settings={activeProject?.settings || DEFAULT_SETTINGS}
+              directoryHandle={directoryHandle}
+              onAddToContext={handleAddToContext}
+            />
+            {/* Toggle Terminal Button (Floating bottom right of code area if closed) */}
+            {!isTerminalOpen && (
+               <button 
+                  onClick={() => setIsTerminalOpen(true)}
+                  className="absolute bottom-4 right-6 bg-[#007acc] text-white p-2 rounded-full shadow-lg hover:bg-[#0062a3] z-50 transition-transform hover:scale-105"
+                  title="Abrir Terminal"
+               >
+                 <TerminalSquare className="w-5 h-5" />
+               </button>
+            )}
+          </div>
+          
+          <Terminal 
+            logs={terminalLogs} 
+            isOpen={isTerminalOpen} 
+            onClose={() => setIsTerminalOpen(false)} 
+            onClear={() => setTerminalLogs([])}
           />
         </div>
       </div>

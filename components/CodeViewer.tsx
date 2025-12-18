@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { GeneratedProject, GeneratedFile, PluginSettings } from '../types';
-import { FileCode, Save, Check, FolderOpen, RefreshCw, HardDrive, File, MoreVertical, X } from 'lucide-react';
+import { FileCode, Save, Check, FolderOpen, RefreshCw, HardDrive, File, MoreVertical, X, MessageSquarePlus, TerminalSquare } from 'lucide-react';
 import { saveFileToDisk } from '../services/fileSystem';
 
 interface CodeViewerProps {
@@ -57,6 +57,31 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
         alert("Erro ao salvar: " + e);
     } finally {
         setIsSaving(false);
+    }
+  };
+
+  const handleSendSelectionToChat = () => {
+    if (!textAreaRef.current) return;
+    const start = textAreaRef.current.selectionStart;
+    const end = textAreaRef.current.selectionEnd;
+
+    let textToSend = "";
+
+    if (start !== end) {
+        // Envia seleção
+        textToSend = textAreaRef.current.value.substring(start, end);
+    } else {
+        // Se nada selecionado, envia o arquivo todo (com aviso)
+        const confirmSend = window.confirm("Nenhum código selecionado. Enviar o arquivo inteiro para o Agente?");
+        if (confirmSend) {
+            textToSend = fileContent;
+        } else {
+            return;
+        }
+    }
+
+    if (textToSend) {
+        onAddToContext(textToSend);
     }
   };
 
@@ -134,7 +159,16 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                     <button className="hover:bg-[#333] rounded p-0.5 ml-1"><X className="w-3 h-3 text-gray-400" /></button>
                 </div>
                 {/* Actions */}
-                <div className="ml-auto px-4 flex items-center gap-3">
+                <div className="ml-auto px-4 flex items-center gap-2">
+                     <button
+                        onClick={handleSendSelectionToChat}
+                        className="text-gray-300 hover:text-white hover:bg-[#333] px-2 py-1 rounded flex items-center gap-1.5 text-xs transition-colors border border-transparent hover:border-[#444]"
+                        title="Enviar código selecionado (ou arquivo) para o Agente"
+                     >
+                        <MessageSquarePlus className="w-3.5 h-3.5" />
+                        <span>Enviar para Agente</span>
+                     </button>
+                     <div className="w-[1px] h-4 bg-[#333] mx-1"></div>
                     <button 
                         onClick={handleSave} 
                         disabled={!isDirty && !isSaving}
@@ -186,7 +220,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                         }}
                         className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#094771] hover:text-white flex items-center gap-2"
                     >
-                        <RefreshCw className="w-3 h-3" /> Adicionar ao Chat
+                        <MessageSquarePlus className="w-3 h-3" /> Adicionar ao Chat
                     </button>
                     <div className="h-[1px] bg-[#454545] my-1 mx-2"></div>
                     <button className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#094771] hover:text-white opacity-50 cursor-not-allowed">
