@@ -4,6 +4,7 @@ import { Terminal as TerminalIcon, X, Trash2, Power, AlertTriangle, RefreshCw } 
 import { bridgeService } from '../services/bridgeService';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css'; // Importante para os estilos do xterm
 
 interface TerminalProps {
   logs: string[];
@@ -21,7 +22,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
   const [isConnected, setIsConnected] = useState(false);
   const [mode, setMode] = useState<'APP' | 'CMD'>('APP');
   
-  // Buffer para linha de comando local (já que não temos um PTY real do outro lado)
+  // Buffer para linha de comando local
   const cmdBufferRef = useRef<string>('');
 
   // Inicializa o xterm.js
@@ -83,7 +84,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
       if (!bridgeService.isConnected()) {
           // Apenas avisa se tentar digitar algo que não seja enter
           if (e === '\r') {
-             term.writeln('\r\n\x1b[33m[AVISO] Terminal desconectado. Clique em "LOCAL CMD" para conectar.\x1b[0m');
+             term.writeln('\r\n\x1b[33m[AVISO] Terminal desconectado. Clique em "LOCAL SHELL" para conectar.\x1b[0m');
              term.write('$ ');
           }
           return;
@@ -97,8 +98,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
             bridgeService.send(command);
           }
           cmdBufferRef.current = '';
-          // O prompt será desenhado quando a resposta vier ou podemos forçar
-          // term.write('> '); // Deixa o backend responder
+          // O backend enviará a resposta
           break;
         case '\u007F': // Backspace (DEL)
           if (cmdBufferRef.current.length > 0) {
@@ -109,7 +109,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
         case '\u0003': // Ctrl+C
             term.write('^C\r\n');
             cmdBufferRef.current = '';
-            // Idealmente enviaria sinal de kill para o backend
+            // Idealmente enviaria sinal de kill para o backend se suportado
             break;
         default:
           // Filtra caracteres imprimíveis básicos e alguns acentos
@@ -129,38 +129,21 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
       term.dispose();
       xtermRef.current = null;
     };
-  }, []); // Executa apenas na montagem inicial do componente
+  }, []);
 
-  // Sincroniza estado de Logs do App com o Xterm
-  // Toda vez que `logs` muda, escrevemos as novas linhas no xterm
-  // Precisamos rastrear o índice para não reescrever tudo
   const lastLogIndexRef = useRef(0);
   
   useEffect(() => {
     if (!xtermRef.current) return;
     
-    // Se mudou para modo APP, talvez limpar e reescrever tudo? 
-    // Ou apenas adicionar? Vamos apenas adicionar por enquanto.
-    
     const newLogs = logs.slice(lastLogIndexRef.current);
     if (newLogs.length > 0) {
-        // Se estivermos no modo CMD e chegar log do APP, talvez mostrar uma notificação?
-        // Por simplificação, o xterm é um buffer único compartilhado visualmente.
-        // Se quisermos separar, teríamos que limpar o buffer visualmente ao trocar de aba,
-        // mas xterm não armazena buffer 'oculto' facilmente.
-        
-        // Estratégia: O Xterm mostra TUDO. A aba 'APP' filtra visualmente? Não.
-        // Vamos usar o xterm para mostrar logs do app também.
-        
         newLogs.forEach(log => {
-             // Formata log do app
              xtermRef.current?.writeln(`\x1b[36m[APP]\x1b[0m ${log.replace(/\n/g, '\r\n')}`);
         });
         
-        // Se não estava digitando, rola para o fim
         xtermRef.current.scrollToBottom();
         
-        // Se estiver no modo APP, desenha um prompt falso
         if (mode === 'APP') {
              xtermRef.current.write('\r$ ');
         }
@@ -169,10 +152,8 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
     }
   }, [logs, mode]);
 
-  // Observer para redimensionar quando a div se torna visível (isOpen)
   useEffect(() => {
     if (isOpen && fitAddonRef.current) {
-        // Pequeno delay para garantir que a animação CSS terminou ou o DOM renderizou
         setTimeout(() => {
             fitAddonRef.current?.fit();
         }, 50);
@@ -194,9 +175,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
       
       bridgeService.connect(
         (data) => {
-           // Output que vem do servidor
            if (xtermRef.current) {
-               // O servidor envia dados brutos, xterm processa ANSI
                xtermRef.current.write(data);
            }
         },
@@ -213,7 +192,7 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
 
   const handleClear = () => {
       xtermRef.current?.clear();
-      onClear(); // Limpa estado do react também
+      onClear();
       lastLogIndexRef.current = 0;
       xtermRef.current?.write(mode === 'CMD' && isConnected ? '> ' : '$ ');
   };
@@ -222,7 +201,6 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
 
   return (
     <div className="h-64 bg-[#0c0c0c] border-t border-[#2b2b2b] flex flex-col font-mono text-sm z-20 shadow-[-4px_-4px_10px_rgba(0,0,0,0.5)] transition-all duration-200">
-      {/* Terminal Header */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-[#1e1e1e] border-b border-[#2b2b2b] select-none shrink-0">
         <div className="flex gap-4 items-center">
           <div className="flex gap-1 items-center mr-2">
@@ -283,7 +261,6 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
         </div>
       </div>
 
-      {/* XTerm Container */}
       <div className="flex-1 relative overflow-hidden bg-[#0c0c0c] p-1">
          <div ref={terminalContainerRef} className="w-full h-full" />
       </div>
