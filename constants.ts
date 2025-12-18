@@ -79,6 +79,7 @@ zipStoreBase=GRADLE_USER_HOME
 zipStorePath=wrapper/dists
 `;
 
+// Updated with auto-download logic for gradle-wrapper.jar
 export const GRADLEW_UNIX = `#!/bin/sh
 #
 # Copyright 2015 the original author or authors.
@@ -155,6 +156,22 @@ case "\`uname\`" in
 esac
 
 CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
+
+# --- MINEGEN FIX: Download wrapper jar if missing ---
+if [ ! -f "$CLASSPATH" ]; then
+    echo "MineGen: Gradle Wrapper JAR not found. Downloading..."
+    mkdir -p "$APP_HOME/gradle/wrapper"
+    JAR_URL="https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar"
+    if command -v curl >/dev/null 2>&1; then
+        curl -L -o "$CLASSPATH" "$JAR_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "$CLASSPATH" "$JAR_URL"
+    else
+        echo "Error: curl or wget not found. Cannot download gradle-wrapper.jar."
+        exit 1
+    fi
+fi
+# ----------------------------------------------------
 
 # Determine the Java command to use to start the JVM.
 if [ -n "$JAVA_HOME" ] ; then
@@ -235,9 +252,9 @@ if $cygwin ; then
         (1) set -- "$args0" ;;
         (2) set -- "$args0" "$args1" ;;
         (3) set -- "$args0" "$args1" "$args2" ;;
-        (4) set -- "$args0" "$args1" "$args2" "$args3" ;;
-        (5) set -- "$args0" "$args1" "$args2" "$args3" "$args4" ;;
-        (6) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" ;;
+        (4) set -- "$args0" "$args1" "$args2" ;;
+        (5) set -- "$args0" "$args1" "$args2" "$args3" ;;
+        (6) set -- "$args0" "$args1" "$args2" "$args3" "$args4" ;;
         (7) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" "$args6" ;;
         (8) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" "$args6" "$args7" ;;
         (9) set -- "$args0" "$args1" "$args2" "$args3" "$args4" "$args5" "$args6" "$args7" "$args8" ;;
@@ -257,6 +274,7 @@ eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "\\"-Dorg.gradle.appname=$
 exec "$JAVACMD" "$@"
 `;
 
+// Updated with auto-download logic for gradle-wrapper.jar
 export const GRADLEW_BAT = `@if "%DEBUG%" == "" @echo off
 @rem ##########################################################################
 @rem
@@ -324,6 +342,18 @@ set CMD_LINE_ARGS=%*
 
 set CLASSPATH=%APP_HOME%\\gradle\\wrapper\\gradle-wrapper.jar
 
+@rem --- MINEGEN FIX: Download wrapper jar if missing ---
+if exist "%CLASSPATH%" goto startGradle
+echo MineGen: Gradle Wrapper JAR not found. Downloading...
+if not exist "%APP_HOME%\\gradle\\wrapper" mkdir "%APP_HOME%\\gradle\\wrapper"
+powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar', '%CLASSPATH%')"
+if not exist "%CLASSPATH%" (
+    echo Error: Failed to download gradle-wrapper.jar
+    goto fail
+)
+@rem ----------------------------------------------------
+
+:startGradle
 @rem Execute Gradle
 "%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %CMD_LINE_ARGS%
 
