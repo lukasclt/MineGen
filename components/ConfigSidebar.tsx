@@ -30,6 +30,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
     setSettings(prev => ({ ...prev, [field]: value }));
   };
 
+  const isConfigDisabled = !currentProjectId;
+
   return (
     <div className={`fixed inset-y-0 left-0 z-30 w-80 bg-mc-panel border-r border-gray-700 transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 overflow-y-auto flex flex-col`}>
       
@@ -102,6 +104,11 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
         {/* --- CONFIG TAB --- */}
         {activeTab === 'config' && (
           <div className="p-4 space-y-6">
+            {!currentProjectId && (
+               <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-200 p-3 rounded text-xs mb-2">
+                 Selecione um projeto para editar as configurações.
+               </div>
+            )}
             
             {/* AI Config */}
             <div className="space-y-3 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
@@ -112,10 +119,11 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <span className="text-xs text-gray-400 mb-1 block">Modelo ID</span>
                  <input
                   type="text"
-                  value={settings.aiModel}
+                  value={settings.aiModel || ''}
                   onChange={(e) => handleChange('aiModel', e.target.value)}
+                  disabled={isConfigDisabled}
                   placeholder="google/gemini-2.0-flash-001"
-                  className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white font-mono"
+                  className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white font-mono disabled:opacity-50"
                 />
               </div>
             </div>
@@ -129,9 +137,10 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <span className="text-xs text-gray-500 mb-1 block">Nome</span>
                 <input
                   type="text"
-                  value={settings.name}
+                  value={settings.name || ''}
                   onChange={(e) => handleChange('name', e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white"
+                  disabled={isConfigDisabled}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -139,18 +148,20 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                   <span className="text-xs text-gray-500 mb-1 block">Group ID</span>
                   <input
                     type="text"
-                    value={settings.groupId}
+                    value={settings.groupId || ''}
                     onChange={(e) => handleChange('groupId', e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs focus:border-mc-accent focus:outline-none text-white"
+                    disabled={isConfigDisabled}
+                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                   />
                 </div>
                 <div>
                   <span className="text-xs text-gray-500 mb-1 block">Artifact ID</span>
                   <input
                     type="text"
-                    value={settings.artifactId}
+                    value={settings.artifactId || ''}
                     onChange={(e) => handleChange('artifactId', e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs focus:border-mc-accent focus:outline-none text-white"
+                    disabled={isConfigDisabled}
+                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -167,7 +178,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <select
                   value={settings.platform}
                   onChange={(e) => handleChange('platform', e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white"
+                  disabled={isConfigDisabled}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                 >
                   {Object.values(Platform).map(p => (
                     <option key={p} value={p}>{p}</option>
@@ -181,7 +193,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <select
                   value={settings.buildSystem}
                   onChange={(e) => handleChange('buildSystem', e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white"
+                  disabled={isConfigDisabled}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                 >
                   {Object.values(BuildSystem).map(sys => (
                     <option key={sys} value={sys}>{sys}</option>
@@ -194,7 +207,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <select
                   value={settings.mcVersion}
                   onChange={(e) => handleChange('mcVersion', e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white"
+                  disabled={isConfigDisabled}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                 >
                   {MC_VERSIONS.map(v => (
                     <option key={v} value={v}>{v}</option>
@@ -207,7 +221,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <select
                   value={settings.javaVersion}
                   onChange={(e) => handleChange('javaVersion', e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white"
+                  disabled={isConfigDisabled}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white disabled:opacity-50"
                 >
                   {Object.entries(JavaVersion).map(([key, val]) => (
                     <option key={key} value={val}>Java {val}</option>
@@ -224,10 +239,11 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
               <div>
                 <span className="text-xs text-gray-500 mb-1 block">Descrição</span>
                 <textarea
-                  value={settings.description}
+                  value={settings.description || ''}
                   onChange={(e) => handleChange('description', e.target.value)}
+                  disabled={isConfigDisabled}
                   rows={3}
-                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white resize-none"
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white resize-none disabled:opacity-50"
                 />
               </div>
             </div>
