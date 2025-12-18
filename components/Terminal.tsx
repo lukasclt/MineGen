@@ -19,6 +19,12 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
   const [localLogs, setLocalLogs] = useState<string[]>([]); // Logs específicos do CMD real
   const [mode, setMode] = useState<'APP' | 'CMD'>('APP'); // Alternar entre logs do App e CMD Real
 
+  // Regex robusto para remover códigos ANSI de cor
+  const stripAnsi = (str: string) => {
+    // eslint-disable-next-line no-control-regex
+    return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+  };
+
   // Efeito de Auto-Scroll
   useEffect(() => {
     if (scrollRef.current) {
@@ -29,7 +35,6 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
   // Focar no input ao clicar no terminal
   const handleContainerClick = () => {
     if (mode === 'CMD' && inputRef.current) {
-        // Não foca se o usuário estiver selecionando texto
         const selection = window.getSelection();
         if (!selection || selection.toString().length === 0) {
             inputRef.current.focus();
@@ -46,9 +51,11 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
       setMode('CMD');
       bridgeService.connect(
         (data) => {
-           // Limpa caracteres de escape ANSI básicos para exibição simples (poderia usar xterm.js para suporte total)
-           // Por enquanto, exibiremos raw ou com limpeza mínima
-           setLocalLogs(prev => [...prev, data]);
+           const cleanData = stripAnsi(data);
+           // Evita linhas vazias excessivas
+           if (cleanData.length > 0) {
+             setLocalLogs(prev => [...prev, cleanData]);
+           }
         },
         () => {
            setIsConnected(false);
@@ -64,11 +71,11 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
       
       if (mode === 'CMD' && isConnected) {
         bridgeService.send(command);
-        // O echo local geralmente vem do servidor, mas podemos adicionar para feedback imediato se quiser
+        // Opcional: Mostrar comando digitado localmente (echo)
         // setLocalLogs(prev => [...prev, `> ${command}\n`]);
       } else {
         onAddLog(`$ ${command}`);
-        onAddLog(`Comando não reconhecido no modo APP (Use o modo CMD para executar no sistema).`);
+        onAddLog(`Comando não reconhecido no modo APP. Use a aba "LOCAL CMD" para comandos do sistema.`);
       }
       setCommand('');
     }
@@ -146,11 +153,10 @@ const Terminal: React.FC<TerminalProps> = ({ logs, isOpen, onClose, onClear, onA
                 <AlertTriangle className="w-8 h-8 mx-auto mb-2 opacity-50" />
                 <p className="mb-2 font-bold text-gray-400">Terminal Local Desconectado</p>
                 <p className="mb-4 max-w-md mx-auto">
-                    Para usar o CMD do seu computador aqui, você precisa rodar a ponte local.
+                    Para usar o CMD do seu computador aqui, rode o servidor de ponte.
                 </p>
                 <div className="bg-[#1e1e1e] p-3 rounded text-left inline-block border border-[#333]">
-                    <p className="text-[#007acc]">$ npm install</p>
-                    <p className="text-[#007acc]">$ node scripts/server.cjs</p>
+                    <p className="text-[#007acc] select-all">$ node scripts/server.cjs</p>
                 </div>
             </div>
         )}

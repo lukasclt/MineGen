@@ -14,7 +14,7 @@ class BridgeService {
     });
 
     this.socket.on('connect', () => {
-      onOutput('\x1b[32m>>> Conexão estabelecida com o Terminal Local <<<\x1b[0m\n');
+      onOutput('>>> Conexão estabelecida com o Terminal Local <<<\n');
     });
 
     this.socket.on('output', (data) => {
@@ -22,13 +22,13 @@ class BridgeService {
     });
 
     this.socket.on('connect_error', () => {
-      onOutput('\x1b[31m[ERRO] Não foi possível conectar ao servidor local na porta 3001.\x1b[0m\nCertifique-se de rodar "node scripts/server.cjs" no seu terminal.\n');
+      onOutput('[ERRO] Não foi possível conectar ao servidor local na porta 3001.\nCertifique-se de rodar "node scripts/server.cjs" no seu terminal.\n');
       this.disconnect();
       onDisconnect();
     });
 
     this.socket.on('disconnect', () => {
-      onOutput('\n\x1b[33m>>> Desconectado do Terminal Local <<<\x1b[0m\n');
+      onOutput('\n>>> Desconectado do Terminal Local <<<\n');
       onDisconnect();
     });
   }
