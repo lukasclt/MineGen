@@ -14,6 +14,11 @@ export enum JavaVersion {
   JAVA_21 = '21'
 }
 
+export enum BuildSystem {
+  MAVEN = 'Maven',
+  GRADLE = 'Gradle'
+}
+
 export interface PluginSettings {
   name: string;
   groupId: string;
@@ -22,6 +27,7 @@ export interface PluginSettings {
   platform: Platform;
   mcVersion: string;
   javaVersion: JavaVersion;
+  buildSystem: BuildSystem;
   description: string;
   author: string;
   aiModel?: string;
@@ -36,7 +42,7 @@ export interface GitHubSettings {
 export interface GeneratedFile {
   path: string;
   content: string;
-  language: 'java' | 'xml' | 'yaml' | 'json' | 'text';
+  language: 'java' | 'xml' | 'yaml' | 'json' | 'text' | 'gradle';
 }
 
 export interface GeneratedProject {

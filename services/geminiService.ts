@@ -40,6 +40,7 @@ export const generatePluginCode = async (
     userPromptContext = `
 # CONTEXTO
 Você está modificando o projeto "${settings.name}" para a plataforma ${settings.platform} (MC ${settings.mcVersion}, Java ${settings.javaVersion}).
+Sistema de Build: ${settings.buildSystem}
 
 # ESTADO ATUAL DO PROJETO
 ${fileContext}
@@ -49,7 +50,7 @@ ${prompt}
 
 # INSTRUÇÕES TÉCNICAS
 1. Mantenha a integridade de todas as classes.
-2. Atualize o pom.xml se novas dependências forem necessárias.
+2. Atualize o arquivo de build (${settings.buildSystem === 'Gradle' ? 'build.gradle' : 'pom.xml'}) se novas dependências forem necessárias.
 3. Garanta que o código siga os padrões da API selecionada.
     `;
   } else {
@@ -60,6 +61,7 @@ Nome: ${settings.name}
 Plataforma: ${settings.platform}
 Versão Java: ${settings.javaVersion}
 Versão Minecraft: ${settings.mcVersion}
+Sistema de Build: ${settings.buildSystem}
 
 # SOLICITAÇÃO
 ${prompt}

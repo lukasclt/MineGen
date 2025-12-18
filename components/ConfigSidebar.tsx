@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { PluginSettings, Platform, JavaVersion, SavedProject } from '../types';
+import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -171,6 +171,20 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 >
                   {Object.values(Platform).map(p => (
                     <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+
+               {/* BUILD SYSTEM */}
+               <div>
+                <span className="text-xs text-gray-500 mb-1 block flex items-center gap-1"><Box className="w-3 h-3" /> Sistema de Build</span>
+                <select
+                  value={settings.buildSystem}
+                  onChange={(e) => handleChange('buildSystem', e.target.value)}
+                  className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm focus:border-mc-accent focus:outline-none text-white"
+                >
+                  {Object.values(BuildSystem).map(sys => (
+                    <option key={sys} value={sys}>{sys}</option>
                   ))}
                 </select>
               </div>

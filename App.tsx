@@ -6,7 +6,7 @@ import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { saveDirectoryHandleToDB, getDirectoryHandleFromDB } from './services/fileSystem';
+import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk } from './services/fileSystem';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -43,14 +43,12 @@ const App: React.FC = () => {
         } else if (parsedProjects.length > 0) {
           setCurrentProjectId(parsedProjects[0].id);
         } else {
-          createNewProject();
+          // Do not automatically create a project on load if none exist, 
+          // let the user click "New Project" to handle the folder flow correctly.
         }
-      } else {
-        createNewProject();
-      }
+      } 
     } catch (e) {
       console.error("Failed to load saved state", e);
-      createNewProject();
     } finally {
       setIsLoaded(true);
     }
@@ -97,22 +95,48 @@ const App: React.FC = () => {
     }
   };
 
-  const createNewProject = () => {
-    const newProject: SavedProject = {
-      id: generateUUID(),
-      name: "Novo Projeto",
-      lastModified: Date.now(),
-      settings: { ...DEFAULT_SETTINGS },
-      messages: [{
-        role: 'model',
-        text: `Olá! Configure o projeto e digite algo. Você precisará selecionar uma pasta local para salvar o código automaticamente.`
-      }],
-      generatedProject: null
-    };
+  const handleCreateNewProject = async () => {
+    try {
+      // 1. Force folder selection immediately
+      const handle = await getDirectoryHandle();
+      if (!handle) return; // User cancelled
 
-    setProjects(prev => [newProject, ...prev]);
-    setCurrentProjectId(newProject.id);
-    if (window.innerWidth < 768) setSidebarOpen(false);
+      // 2. Read existing files
+      const loadedProject = await readProjectFromDisk(handle);
+      const hasFiles = loadedProject.files.length > 0;
+      
+      const newId = generateUUID();
+      
+      // 3. Create Project State
+      const newProject: SavedProject = {
+        id: newId,
+        name: handle.name || "Novo Projeto",
+        lastModified: Date.now(),
+        settings: { ...DEFAULT_SETTINGS, name: handle.name || DEFAULT_SETTINGS.name },
+        messages: [{
+          role: 'model',
+          text: hasFiles 
+            ? `📁 Pasta **${handle.name}** vinculada com sucesso!\nEncontrei ${loadedProject.files.length} arquivos.\nComo posso ajudar a editar este projeto?`
+            : `📁 Pasta **${handle.name}** vinculada (Vazia).\nO que você gostaria de criar hoje?`
+        }],
+        generatedProject: hasFiles ? loadedProject : null
+      };
+
+      // 4. Update State and DB
+      setProjects(prev => [newProject, ...prev]);
+      setCurrentProjectId(newProject.id);
+      
+      // Save the handle immediately
+      setDirectoryHandle(handle);
+      await saveDirectoryHandleToDB(newId, handle);
+
+      if (window.innerWidth < 768) setSidebarOpen(false);
+
+    } catch (error: any) {
+      if (error.name !== 'AbortError') {
+        alert("Erro ao criar projeto: " + error.message);
+      }
+    }
   };
 
   const deleteProject = (id: string) => {
@@ -121,7 +145,7 @@ const App: React.FC = () => {
     setProjects(newProjects);
     if (currentProjectId === id) {
       if (newProjects.length > 0) setCurrentProjectId(newProjects[0].id);
-      else createNewProject();
+      else setCurrentProjectId(null);
     }
   };
 
@@ -140,12 +164,10 @@ const App: React.FC = () => {
     updateActiveProject({ settings: resolvedSettings });
   };
 
-  // FIXED: Handle functional updates for messages correctly to prevent app crash
   const handleMessagesUpdate = (newMessagesOrUpdater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setProjects(prevProjects => prevProjects.map(p => {
       if (p.id === currentProjectId) {
         const currentMessages = p.messages || [];
-        // Resolve the new messages if it's a function (prev => ...) or take the value directly
         const updatedMessages = typeof newMessagesOrUpdater === 'function' 
           ? newMessagesOrUpdater(currentMessages)
           : newMessagesOrUpdater;
@@ -181,7 +203,7 @@ const App: React.FC = () => {
         projects={projects}
         currentProjectId={currentProjectId}
         onSelectProject={(id) => { setCurrentProjectId(id); }}
-        onCreateProject={createNewProject}
+        onCreateProject={handleCreateNewProject}
         onDeleteProject={deleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
         setSettings={handleSettingsChange}
@@ -198,7 +220,7 @@ const App: React.FC = () => {
         </div>
 
         <div className="flex-1 md:w-[40%] md:flex-none border-r border-gray-800 h-full overflow-hidden bg-mc-dark/50 backdrop-blur-sm">
-          {activeProject && (
+          {activeProject ? (
             <ChatInterface 
               key={activeProject.id}
               settings={activeProject.settings} 
@@ -212,6 +234,20 @@ const App: React.FC = () => {
               directoryHandle={directoryHandle}
               onSetDirectoryHandle={handleSetDirectoryHandle}
             />
+          ) : (
+             <div className="flex flex-col items-center justify-center h-full text-gray-400 p-8 text-center space-y-4">
+                <div className="w-16 h-16 bg-mc-panel rounded-full flex items-center justify-center mb-2 shadow-lg border border-gray-700">
+                    <Menu className="w-8 h-8 text-mc-accent" />
+                </div>
+                <h2 className="text-xl font-bold text-white">Bem-vindo ao MineGen AI</h2>
+                <p className="max-w-md">Selecione um projeto existente na barra lateral ou clique em "Novo Projeto" para começar a editar ou criar plugins.</p>
+                <button 
+                  onClick={handleCreateNewProject}
+                  className="bg-mc-accent hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow-lg transition-transform active:scale-95"
+                >
+                  Selecionar Pasta & Criar Projeto
+                </button>
+             </div>
           )}
         </div>
 
