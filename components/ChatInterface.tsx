@@ -1,9 +1,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, VolumeX, Mic, MicOff, StopCircle } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { getDirectoryHandle, saveProjectToDisk, verifyPermission, readProjectFromDisk } from '../services/fileSystem';
+import { playSound, speakText, stopSpeech } from '../services/audioService';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
@@ -50,6 +51,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [queue, setQueue] = useState<{text: string, att: Attachment[]}[]>([]);
   const [needsPermission, setNeedsPermission] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -75,7 +77,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => clearInterval(interval);
   }, [isLoading]);
 
-  // Initial Sync Logic with Permission Check
+  // Initial Sync Logic
   useEffect(() => {
     const checkAndSync = async () => {
       if (directoryHandle && !currentProject && !isReading) {
@@ -126,11 +128,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [input]);
 
+  // Monitor Speaking Status (Simple heuristic)
+  useEffect(() => {
+     if ('speechSynthesis' in window) {
+         const interval = setInterval(() => {
+             setIsSpeaking(window.speechSynthesis.speaking);
+         }, 500);
+         return () => clearInterval(interval);
+     }
+  }, []);
+
   const handleAuthorize = async () => {
       if (!directoryHandle) return;
       const hasPerm = await verifyPermission(directoryHandle, true);
       if (hasPerm) {
           setNeedsPermission(false);
+          if (settings.enableSounds) playSound('success');
           await syncProjectFiles(directoryHandle, true);
       }
   };
@@ -149,6 +162,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }
     } catch (error: any) {
       console.error("Sync error", error);
+      if (settings.enableSounds) playSound('error');
       if (notifyUser) {
         setMessages(prev => [...prev, {
            role: 'model',
@@ -161,23 +175,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const handleSelectFolder = async () => {
-    try {
-      const handle = await getDirectoryHandle();
-      onSetDirectoryHandle(handle);
-      setNeedsPermission(false);
-      await syncProjectFiles(handle, true);
-      return handle;
-    } catch (error: any) {
-      if (error.name !== 'AbortError') alert("Erro ao selecionar pasta: " + error.message);
-      return null;
-    }
-  };
-
   const executeAiGeneration = async (text: string, currentAttachments: Attachment[]) => {
     setIsLoading(true);
     setProgress(0);
     setLoadingText('Processando agente...');
+    if (settings.enableSounds) playSound('click');
 
     const progressInterval = setInterval(() => {
       setProgress(prev => {
@@ -210,10 +212,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       };
       
       setMessages(prev => [...prev, aiMessage]);
+
+      // Feedback Auditivo
+      if (settings.enableSounds) playSound('success');
+      
+      // Auto-Read (TTS)
+      if (settings.enableTTS) {
+          speakText(project.explanation);
+      }
       
     } catch (error: any) {
       clearInterval(progressInterval);
       setIsSaving(false);
+      
+      if (settings.enableSounds) playSound('error');
+
       let errMsg = error.message || "Falha crítica.";
       if (errMsg.includes("not allowed by the user agent")) {
           errMsg = "Erro de Permissão: O navegador bloqueou o acesso aos arquivos. Por favor, clique no botão 'Autorizar Acesso' acima ou re-selecione a pasta.";
@@ -246,6 +259,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (settings.enableSounds) playSound('message');
   };
 
   const removeAttachment = (index: number) => {
@@ -260,14 +274,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (!currentHandle) {
        const confirmSelect = window.confirm("Selecione a pasta do projeto para permitir que o Agente IA gerencie os arquivos.");
        if (!confirmSelect) return;
-       currentHandle = await handleSelectFolder();
-       if (!currentHandle) return;
+       const handle = await getDirectoryHandle();
+       if (!handle) return;
+       onSetDirectoryHandle(handle);
+       setNeedsPermission(false);
+       await syncProjectFiles(handle, true);
+       currentHandle = handle;
     }
 
     if (needsPermission) {
         alert("Por favor, autorize o acesso à pasta clicando no botão 'Autorizar Acesso' antes de enviar comandos.");
+        if (settings.enableSounds) playSound('error');
         return;
     }
+
+    if (settings.enableSounds) playSound('message');
 
     const userMessage: ChatMessage = { role: 'user', text: text, attachments: [...attachments] };
     
@@ -288,6 +309,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       e.preventDefault();
       handleAddToQueue(input);
     }
+  };
+
+  // Helper to manual speak a message
+  const handleManualSpeak = (text: string) => {
+      if (isSpeaking) {
+          stopSpeech();
+          setIsSpeaking(false);
+      } else {
+          speakText(text);
+          setIsSpeaking(true);
+      }
   };
 
   return (
@@ -312,6 +344,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       {/* Toolbar Header (Overlay) */}
        <div className="absolute top-2 right-4 z-10 flex gap-2 pointer-events-none">
          <div className="pointer-events-auto flex gap-2">
+            
+            {/* Audio Controls */}
+            {isSpeaking && (
+                <button 
+                onClick={stopSpeech} 
+                className="text-white bg-red-500/80 p-2 rounded-md hover:bg-red-600 animate-pulse transition-colors shadow-lg"
+                title="Parar Fala"
+                >
+                <StopCircle className="w-4 h-4" />
+                </button>
+            )}
+
             {directoryHandle && (
                 <button 
                 onClick={() => handleAuthorize()} 
@@ -333,13 +377,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     {msg.isError ? <AlertCircle className="w-5 h-5 text-red-200" /> : msg.role === 'model' ? <Bot className="w-5 h-5 text-white" /> : <User className="w-5 h-5 text-gray-300" />}
                 </div>
                 
-                <div className={`max-w-[85%] flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'} min-w-0`}>
-                    <div className={`px-4 py-2.5 rounded text-sm whitespace-pre-wrap leading-6 shadow-sm break-words max-w-full ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'}`}>
+                <div className={`max-w-[85%] flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'} min-w-0 group`}>
+                    <div className={`px-4 py-2.5 rounded text-sm whitespace-pre-wrap leading-6 shadow-sm break-words max-w-full relative ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'}`}>
                         {msg.text}
                         {msg.projectData && (
                             <div className="mt-2 pt-2 border-t border-[#444] text-xs text-green-400 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3" /> Alterações aplicadas
                             </div>
+                        )}
+                        
+                        {/* Message Actions (Visible on hover) */}
+                        {msg.role === 'model' && !msg.isError && (
+                            <button 
+                                onClick={() => handleManualSpeak(msg.text)}
+                                className="absolute -bottom-6 left-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white flex items-center gap-1 text-[10px]"
+                                title="Ler em voz alta"
+                            >
+                                <Volume2 className="w-3 h-3" /> Ler
+                            </button>
                         )}
                     </div>
                     

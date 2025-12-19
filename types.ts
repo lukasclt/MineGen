@@ -31,6 +31,9 @@ export interface PluginSettings {
   description: string;
   author: string;
   aiModel?: string;
+  // Audio Settings
+  enableSounds: boolean;
+  enableTTS: boolean;
 }
 
 export interface GitHubSettings {

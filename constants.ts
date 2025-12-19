@@ -12,7 +12,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   buildSystem: BuildSystem.MAVEN,
   description: "Um plugin legal gerado por IA.",
   author: "MineGenAI",
-  aiModel: "google/gemini-2.0-flash-001" // Default for OpenRouter
+  aiModel: "google/gemini-2.0-flash-001", // Default for OpenRouter
+  enableSounds: true,
+  enableTTS: false // TTS disabled by default as it can be intrusive
 };
 
 export const MC_VERSIONS = [

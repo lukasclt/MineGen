@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -26,7 +26,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'chats' | 'config'>('chats');
 
-  const handleChange = (field: keyof PluginSettings, value: string) => {
+  const handleChange = (field: keyof PluginSettings, value: any) => {
     setSettings(prev => ({ ...prev, [field]: value }));
   };
 
@@ -110,6 +110,38 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                </div>
             )}
             
+            {/* Audio Settings (New) */}
+            <div className="space-y-3 bg-gray-800/30 p-3 rounded-lg border border-gray-700/50">
+               <label className="text-xs font-semibold text-mc-accent uppercase tracking-wider flex items-center gap-1">
+                <Volume2 className="w-3 h-3" /> Áudio & Voz
+              </label>
+              
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-300">Efeitos Sonoros</span>
+                <button 
+                   onClick={() => handleChange('enableSounds', !settings.enableSounds)}
+                   disabled={isConfigDisabled}
+                   className={`w-10 h-5 rounded-full relative transition-colors ${settings.enableSounds ? 'bg-green-500' : 'bg-gray-600'} disabled:opacity-50`}
+                >
+                   <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${settings.enableSounds ? 'left-6' : 'left-1'}`}></div>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                    <span className="text-sm text-gray-300 flex items-center gap-1">Leitura Automática <Mic className="w-3 h-3 text-gray-500" /></span>
+                    <span className="text-[10px] text-gray-500">Lê respostas da IA (sem código)</span>
+                </div>
+                <button 
+                   onClick={() => handleChange('enableTTS', !settings.enableTTS)}
+                   disabled={isConfigDisabled}
+                   className={`w-10 h-5 rounded-full relative transition-colors ${settings.enableTTS ? 'bg-green-500' : 'bg-gray-600'} disabled:opacity-50`}
+                >
+                   <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${settings.enableTTS ? 'left-6' : 'left-1'}`}></div>
+                </button>
+              </div>
+            </div>
+
             {/* AI Config */}
             <div className="space-y-3 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
                <label className="text-xs font-semibold text-mc-gold uppercase tracking-wider flex items-center gap-1">
@@ -261,7 +293,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
             <Download className="w-4 h-4" /> Instalar App
           </button>
         )}
-        <p className="text-xs text-gray-500 text-center">MineGen AI v2.1 (OpenRouter)</p>
+        <p className="text-xs text-gray-500 text-center">MineGen AI v2.2 (OpenRouter + Audio)</p>
       </div>
     </div>
   );
