@@ -31,7 +31,8 @@ export const playSound = (type: 'success' | 'error' | 'message' | 'click') => {
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(659.25, now); // E5
         oscillator.frequency.exponentialRampToValueAtTime(830.61, now + 0.1); // G#5
-        gainNode.gain.setValueAtTime(0.3, now);
+        // Volume aumentado para ~100% (0.8 é seguro para sine wave evitar clipping digital severo)
+        gainNode.gain.setValueAtTime(0.8, now);
         gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
         oscillator.start(now);
         oscillator.stop(now + 0.6);
@@ -42,7 +43,8 @@ export const playSound = (type: 'success' | 'error' | 'message' | 'click') => {
         oscillator.type = 'sawtooth';
         oscillator.frequency.setValueAtTime(150, now);
         oscillator.frequency.linearRampToValueAtTime(100, now + 0.3);
-        gainNode.gain.setValueAtTime(0.2, now);
+        // Volume aumentado para Máximo (Sawtooth é percebido como mais alto, 0.5 é muito alto)
+        gainNode.gain.setValueAtTime(0.5, now);
         gainNode.gain.linearRampToValueAtTime(0.01, now + 0.3);
         oscillator.start(now);
         oscillator.stop(now + 0.3);
@@ -52,7 +54,8 @@ export const playSound = (type: 'success' | 'error' | 'message' | 'click') => {
         // Pop (Short Sine)
         oscillator.type = 'sine';
         oscillator.frequency.setValueAtTime(800, now);
-        gainNode.gain.setValueAtTime(0.1, now);
+        // Volume aumentado
+        gainNode.gain.setValueAtTime(0.4, now);
         gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
         oscillator.start(now);
         oscillator.stop(now + 0.1);
@@ -62,7 +65,8 @@ export const playSound = (type: 'success' | 'error' | 'message' | 'click') => {
         // Mechanical Click
         oscillator.type = 'square';
         oscillator.frequency.setValueAtTime(200, now);
-        gainNode.gain.setValueAtTime(0.05, now);
+        // Click audível
+        gainNode.gain.setValueAtTime(0.1, now);
         gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
         oscillator.start(now);
         oscillator.stop(now + 0.05);
@@ -97,9 +101,9 @@ export const speakText = (text: string) => {
   
   currentUtterance = new SpeechSynthesisUtterance(clean);
   currentUtterance.lang = 'pt-BR';
-  currentUtterance.rate = 1.1;
+  currentUtterance.rate = 1.1; // Um pouco mais rápido que o normal
   currentUtterance.pitch = 1;
-  currentUtterance.volume = 0.8;
+  currentUtterance.volume = 1.0; // 100% Volume Máximo
 
   // Tentar selecionar uma voz melhor se disponível
   const voices = window.speechSynthesis.getVoices();

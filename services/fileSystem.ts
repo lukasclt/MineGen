@@ -1,5 +1,5 @@
 
-import { GeneratedProject, GeneratedFile } from "../types";
+import { GeneratedProject, GeneratedFile, PluginSettings, BuildSystem, Platform, JavaVersion } from "../types";
 
 // --- IndexedDB Configuration ---
 const DB_NAME = 'MineGenDB';
@@ -126,6 +126,70 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
     explanation: "Projeto carregado do disco.",
     files: files
   };
+};
+
+// --- Intelligent Project Analysis ---
+
+export const detectProjectSettings = (files: GeneratedFile[]): Partial<PluginSettings> => {
+    const settings: Partial<PluginSettings> = {};
+
+    // 1. Detect Build System and Metadata
+    const pom = files.find(f => f.path.endsWith('pom.xml'));
+    const gradle = files.find(f => f.path.endsWith('build.gradle') || f.path.endsWith('build.gradle.kts'));
+
+    if (pom) {
+        settings.buildSystem = BuildSystem.MAVEN;
+        
+        // Naive XML Parsing using regex
+        const artifactIdMatch = pom.content.match(/<artifactId>(.*?)<\/artifactId>/);
+        const groupIdMatch = pom.content.match(/<groupId>(.*?)<\/groupId>/);
+        const javaVersionMatch = pom.content.match(/<java\.version>(.*?)<\/java\.version>/) || 
+                                 pom.content.match(/<maven\.compiler\.source>(.*?)<\/maven\.compiler\.source>/);
+        
+        if (artifactIdMatch) settings.name = artifactIdMatch[1];
+        if (groupIdMatch) settings.groupId = groupIdMatch[1];
+        if (artifactIdMatch) settings.artifactId = artifactIdMatch[1]; // Typically same as name
+        
+        // Detect Java Version
+        if (javaVersionMatch) {
+            const ver = javaVersionMatch[1];
+            if (ver.includes('1.8')) settings.javaVersion = JavaVersion.JAVA_8;
+            else if (ver.includes('11')) settings.javaVersion = JavaVersion.JAVA_11;
+            else if (ver.includes('16')) settings.javaVersion = JavaVersion.JAVA_16;
+            else if (ver.includes('17')) settings.javaVersion = JavaVersion.JAVA_17;
+            else if (ver.includes('21')) settings.javaVersion = JavaVersion.JAVA_21;
+        }
+
+        // Detect Platform based on dependencies
+        if (pom.content.includes('io.papermc.paper')) settings.platform = Platform.PAPER;
+        else if (pom.content.includes('org.spigotmc')) settings.platform = Platform.SPIGOT;
+        else if (pom.content.includes('com.velocitypowered')) settings.platform = Platform.VELOCITY;
+        else if (pom.content.includes('net.md-5')) settings.platform = Platform.BUNGEECORD;
+
+    } else if (gradle) {
+        settings.buildSystem = BuildSystem.GRADLE;
+
+        // Naive Gradle Parsing
+        // Try to find rootProject.name inside settings.gradle if exists, else guess
+        const settingsGradle = files.find(f => f.path.endsWith('settings.gradle'));
+        if (settingsGradle) {
+             const nameMatch = settingsGradle.content.match(/rootProject\.name\s*=\s*['"](.*?)['"]/);
+             if (nameMatch) settings.name = nameMatch[1];
+        }
+
+        // Detect Platform
+        if (gradle.content.includes('io.papermc.paper') || gradle.content.includes('paper-api')) settings.platform = Platform.PAPER;
+        else if (gradle.content.includes('org.spigotmc')) settings.platform = Platform.SPIGOT;
+        else if (gradle.content.includes('com.velocitypowered')) settings.platform = Platform.VELOCITY;
+        
+        // Detect Java
+        if (gradle.content.includes('JavaLanguageVersion.of(17)')) settings.javaVersion = JavaVersion.JAVA_17;
+        else if (gradle.content.includes('JavaLanguageVersion.of(21)')) settings.javaVersion = JavaVersion.JAVA_21;
+        else if (gradle.content.includes('sourceCompatibility = 1.8') || gradle.content.includes('sourceCompatibility = \'1.8\'')) settings.javaVersion = JavaVersion.JAVA_8;
+        else if (gradle.content.includes('sourceCompatibility = 17')) settings.javaVersion = JavaVersion.JAVA_17;
+    }
+
+    return settings;
 };
 
 export const saveFileToDisk = async (directoryHandle: any, path: string, content: string) => {

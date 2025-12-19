@@ -7,7 +7,7 @@ import CodeViewer from './components/CodeViewer';
 import Terminal from './components/Terminal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk } from './services/fileSystem';
+import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings } from './services/fileSystem';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -117,17 +117,37 @@ const App: React.FC = () => {
       const hasFiles = loadedProject.files.length > 0;
       addLog(`Sistema: ${loadedProject.files.length} arquivos encontrados.`);
       
+      // AUTO DETECTION LOGIC
+      let detectedSettings: Partial<PluginSettings> = {};
+      let detectionLog = "";
+      if (hasFiles) {
+          detectedSettings = detectProjectSettings(loadedProject.files);
+          if (detectedSettings.platform) detectionLog += ` Plataforma: ${detectedSettings.platform}.`;
+          if (detectedSettings.buildSystem) detectionLog += ` Build: ${detectedSettings.buildSystem}.`;
+          if (detectedSettings.javaVersion) detectionLog += ` Java: ${detectedSettings.javaVersion}.`;
+          if (detectionLog) addLog(`Auto-Detecção:${detectionLog}`);
+      }
+
       const newId = generateUUID();
       
       const newProject: SavedProject = {
         id: newId,
-        name: handle.name || "Novo Projeto",
+        name: detectedSettings.name || handle.name || "Novo Projeto",
         lastModified: Date.now(),
-        settings: { ...DEFAULT_SETTINGS, name: handle.name || DEFAULT_SETTINGS.name },
+        settings: { 
+            ...DEFAULT_SETTINGS, 
+            name: detectedSettings.name || handle.name || DEFAULT_SETTINGS.name,
+            ...detectedSettings // Override defaults with detected values
+        },
         messages: [{
           role: 'model',
           text: hasFiles 
-            ? `📁 Pasta **${handle.name}** vinculada!\nEncontrei ${loadedProject.files.length} arquivos.\nComo posso ajudar?`
+            ? `📁 Pasta **${handle.name}** importada com sucesso!\n\n` +
+              `🔍 **Análise Automática**:\n` +
+              (detectedSettings.platform ? `- Plataforma: ${detectedSettings.platform}\n` : '') +
+              (detectedSettings.buildSystem ? `- Build: ${detectedSettings.buildSystem}\n` : '') +
+              (detectedSettings.javaVersion ? `- Java: ${detectedSettings.javaVersion}\n` : '') +
+              `\nEncontrei ${loadedProject.files.length} arquivos. O que você gostaria de modificar?`
             : `📁 Pasta **${handle.name}** vinculada (Vazia).\nO que você gostaria de criar hoje?`
         }],
         generatedProject: hasFiles ? loadedProject : null
