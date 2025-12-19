@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, VolumeX, Mic, MicOff, StopCircle } from 'lucide-react';
+import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, VolumeX, Mic, MicOff, StopCircle, Clock, Hourglass } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { getDirectoryHandle, saveProjectToDisk, verifyPermission, readProjectFromDisk } from '../services/fileSystem';
 import { playSound, speakText, stopSpeech } from '../services/audioService';
@@ -49,7 +49,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isReading, setIsReading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [queue, setQueue] = useState<{text: string, att: Attachment[]}[]>([]);
+  
+  // Fila de Mensagens com ID para rastreamento
+  const [queue, setQueue] = useState<{id: string, text: string, att: Attachment[]}[]>([]);
+  
   const [needsPermission, setNeedsPermission] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   
@@ -108,14 +111,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [pendingMessage]);
 
+  // PROCESSADOR DA FILA
   useEffect(() => {
     const processNextInQueue = async () => {
+      // Se estiver carregando ou fila vazia, não faz nada
       if (isLoading || queue.length === 0) return;
 
-      const { text, att } = queue[0];
+      const { id, text, att } = queue[0];
+      
+      // Remove da fila imediatamente para evitar processamento duplo
       setQueue(prev => prev.slice(1));
       
-      await executeAiGeneration(text, att);
+      // Atualiza status visual para 'processing'
+      setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'processing' } : m));
+      
+      await executeAiGeneration(text, att, id);
     };
 
     processNextInQueue();
@@ -175,7 +185,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const executeAiGeneration = async (text: string, currentAttachments: Attachment[]) => {
+  const executeAiGeneration = async (text: string, currentAttachments: Attachment[], messageId?: string) => {
     setIsLoading(true);
     setProgress(0);
     setLoadingText('Processando agente...');
@@ -211,7 +221,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         projectData: project
       };
       
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => {
+        const updated = [...prev];
+        // Atualiza status da mensagem do usuário para 'done'
+        if (messageId) {
+            const idx = updated.findIndex(m => m.id === messageId);
+            if (idx !== -1) updated[idx] = { ...updated[idx], status: 'done' };
+        }
+        return [...updated, aiMessage];
+      });
 
       // Feedback Auditivo
       if (settings.enableSounds) playSound('success');
@@ -233,11 +251,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           setNeedsPermission(true);
       }
 
-      setMessages(prev => [...prev, {
-        role: 'model',
-        text: errMsg,
-        isError: true
-      }]);
+      setMessages(prev => {
+         const updated = [...prev];
+         if (messageId) {
+             const idx = updated.findIndex(m => m.id === messageId);
+             if (idx !== -1) updated[idx] = { ...updated[idx], status: 'done' }; // Consider user message done even if error
+         }
+         return [...updated, {
+            role: 'model',
+            text: errMsg,
+            isError: true
+         }];
+      });
     } finally {
       setIsLoading(false);
       setProgress(0);
@@ -290,10 +315,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     if (settings.enableSounds) playSound('message');
 
-    const userMessage: ChatMessage = { role: 'user', text: text, attachments: [...attachments] };
+    // Gera ID único para a mensagem
+    const msgId = Date.now().toString() + Math.random().toString(36).substring(2);
+
+    const userMessage: ChatMessage = { 
+        id: msgId,
+        role: 'user', 
+        text: text, 
+        attachments: [...attachments],
+        status: 'queued' // Inicialmente na fila
+    };
     
     setMessages(prev => [...prev, userMessage]);
-    setQueue(prev => [...prev, { text, att: [...attachments] }]);
+    
+    // Adiciona à fila de execução
+    setQueue(prev => [...prev, { id: msgId, text, att: [...attachments] }]);
+    
     setInput('');
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -386,6 +423,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             </div>
                         )}
                         
+                        {/* Status da Fila (User only) */}
+                        {msg.role === 'user' && msg.status === 'queued' && (
+                            <div className="absolute -bottom-5 right-0 text-[10px] text-gray-400 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded-full">
+                                <Clock className="w-3 h-3" /> Na Fila...
+                            </div>
+                        )}
+                         {msg.role === 'user' && msg.status === 'processing' && (
+                            <div className="absolute -bottom-5 right-0 text-[10px] text-blue-400 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded-full">
+                                <Hourglass className="w-3 h-3 animate-spin" /> Processando...
+                            </div>
+                        )}
+
                         {/* Message Actions (Visible on hover) */}
                         {msg.role === 'model' && !msg.isError && (
                             <button 
@@ -477,12 +526,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Instrua o Agente (Cole links, código ou anexe arquivos)..."
+            placeholder={queue.length > 0 || isLoading ? "Adicionar à fila..." : "Instrua o Agente..."}
             className="flex-1 bg-[#252526] text-[#cccccc] rounded border border-[#333] px-3 py-2 text-sm focus:outline-none focus:border-[#007acc] resize-none custom-scrollbar"
             style={{ minHeight: '38px', maxHeight: '150px' }} 
           />
-          <button type="submit" disabled={!input.trim() && attachments.length === 0} className="bg-[#007acc] hover:bg-[#0062a3] text-white rounded px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-[1px]">
-             <Send className="w-4 h-4" />
+          <button type="submit" disabled={!input.trim() && attachments.length === 0} className={`text-white rounded px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-[1px] flex items-center gap-1 ${queue.length > 0 || isLoading ? 'bg-orange-600 hover:bg-orange-700' : 'bg-[#007acc] hover:bg-[#0062a3]'}`}>
+             {queue.length > 0 || isLoading ? <Clock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
           </button>
         </form>
       </div>

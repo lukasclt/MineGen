@@ -1,5 +1,5 @@
 
-import { GeneratedProject, GeneratedFile, PluginSettings, BuildSystem, Platform, JavaVersion } from "../types";
+import { GeneratedProject, GeneratedFile, PluginSettings, BuildSystem, Platform, JavaVersion, SavedProject } from "../types";
 
 // --- IndexedDB Configuration ---
 const DB_NAME = 'MineGenDB';
@@ -47,7 +47,8 @@ export const getDirectoryHandleFromDB = async (projectId: string): Promise<any> 
 
 // --- Standard File System API ---
 
-const IGNORED_DIRS = new Set(['.git', 'target', 'build', '.idea', 'node_modules', '.gradle', 'bin']);
+// Adicionado .minegen para ser ignorado na leitura de código, mas usado para persistência
+const IGNORED_DIRS = new Set(['.git', 'target', 'build', '.idea', 'node_modules', '.gradle', 'bin', '.minegen']);
 const IGNORED_EXTENSIONS = new Set(['.jar', '.class', '.png', '.jpg', '.exe', '.dll', '.so', '.zip', '.gz']);
 
 export const getDirectoryHandle = async () => {
@@ -221,4 +222,34 @@ export const saveProjectToDisk = async (directoryHandle: any, project: Generated
   for (const file of project.files) {
     await saveFileToDisk(directoryHandle, file.path, file.content);
   }
+};
+
+// --- PERSISTÊNCIA DE ESTADO (.minegen/state.json) ---
+
+export const saveProjectStateToDisk = async (directoryHandle: any, projectData: SavedProject) => {
+    if (!directoryHandle) return;
+    
+    // Criar payload leve (sem generatedProject duplicado, se quisermos economizar, mas por segurança salvamos tudo menos o IDB handle)
+    // O ID deve ser preservado.
+    const stateToSave = JSON.stringify(projectData, null, 2);
+
+    try {
+        await saveFileToDisk(directoryHandle, '.minegen/state.json', stateToSave);
+    } catch (e) {
+        console.warn("Falha ao salvar .minegen/state.json", e);
+    }
+};
+
+export const loadProjectStateFromDisk = async (directoryHandle: any): Promise<SavedProject | null> => {
+    try {
+        const minegenDir = await directoryHandle.getDirectoryHandle('.minegen');
+        const stateFile = await minegenDir.getFileHandle('state.json');
+        const file = await stateFile.getFile();
+        const text = await file.text();
+        const data = JSON.parse(text) as SavedProject;
+        return data;
+    } catch (e) {
+        // Se não existir ou falhar, retorna null e o app fará auto-detection
+        return null;
+    }
 };

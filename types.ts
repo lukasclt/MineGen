@@ -60,11 +60,13 @@ export interface Attachment {
 }
 
 export interface ChatMessage {
+  id?: string; // Unique ID for queue tracking
   role: 'user' | 'model';
   text: string;
   attachments?: Attachment[];
   projectData?: GeneratedProject; 
   isError?: boolean;
+  status?: 'queued' | 'processing' | 'done'; // Queue status
 }
 
 export interface SavedProject {

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -16,7 +16,7 @@ interface ConfigSidebarProps {
   projects: SavedProject[];
   currentProjectId: string | null;
   onSelectProject: (id: string) => void;
-  onCreateProject: () => void;
+  onCreateProject: () => void; // Used for "Open"/New in file system
   onDeleteProject: (id: string) => void;
 }
 
@@ -56,15 +56,25 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
         {/* --- PROJECTS TAB --- */}
         {activeTab === 'chats' && (
           <div className="p-4 space-y-4">
-             <button 
-              onClick={onCreateProject}
-              className="w-full bg-mc-accent hover:bg-blue-600 text-white rounded-lg py-2.5 px-4 text-sm font-bold transition-all shadow-lg flex items-center justify-center gap-2 mb-4"
-            >
-              <Plus className="w-4 h-4" /> Novo Projeto
-            </button>
+             
+             <div className="flex gap-2 mb-4">
+               <button 
+                onClick={onCreateProject}
+                className="flex-1 bg-mc-accent hover:bg-blue-600 text-white rounded-lg py-2.5 px-3 text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" /> Novo
+              </button>
+              
+              <button 
+                onClick={onCreateProject}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white rounded-lg py-2.5 px-3 text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-2 border border-gray-600"
+              >
+                <FolderOpen className="w-4 h-4" /> Abrir
+              </button>
+             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider pl-1">Seus Chats</label>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider pl-1">Histórico</label>
               {projects.map(project => (
                 <div 
                   key={project.id}
@@ -94,7 +104,9 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
               
               {projects.length === 0 && (
                 <div className="text-center py-8 text-gray-500 text-xs">
-                  Nenhum projeto salvo.
+                  Nenhum projeto aberto.
+                  <br/>
+                  Crie ou abra uma pasta para começar.
                 </div>
               )}
             </div>

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Menu, TerminalSquare } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
@@ -7,7 +7,7 @@ import CodeViewer from './components/CodeViewer';
 import Terminal from './components/Terminal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings } from './services/fileSystem';
+import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk } from './services/fileSystem';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -33,6 +33,9 @@ const App: React.FC = () => {
 
   // AI Trigger State (Bridge between CodeViewer and ChatInterface)
   const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
+
+  // Debounce Ref for Auto-Save
+  const saveTimeoutRef = useRef<number | null>(null);
 
   // Computed Current Project
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
@@ -95,6 +98,27 @@ const App: React.FC = () => {
     loadHandle();
   }, [currentProjectId]);
 
+  // AUTO-SAVE to .minegen/state.json
+  useEffect(() => {
+    if (activeProject && directoryHandle) {
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+        
+        // Debounce save by 2 seconds to avoid excessive disk writes
+        saveTimeoutRef.current = window.setTimeout(async () => {
+            try {
+                await saveProjectStateToDisk(directoryHandle, activeProject);
+                // Optional: addLog("Estado salvo em .minegen/state.json"); 
+            } catch (e) {
+                console.warn("Auto-save falhou", e);
+            }
+        }, 2000);
+    }
+    return () => {
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    }
+  }, [activeProject, directoryHandle]);
+
+
   const handleSetDirectoryHandle = async (handle: any) => {
     setDirectoryHandle(handle);
     addLog(`Sistema: Diretório "${handle.name}" vinculado com sucesso.`);
@@ -107,77 +131,102 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateNewProject = async () => {
+  const handleOpenOrNewProject = async () => {
     try {
       const handle = await getDirectoryHandle();
       if (!handle) return; 
 
-      addLog(`Sistema: Lendo diretório "${handle.name}"...`);
-      const loadedProject = await readProjectFromDisk(handle);
-      const hasFiles = loadedProject.files.length > 0;
-      addLog(`Sistema: ${loadedProject.files.length} arquivos encontrados.`);
-      
-      // AUTO DETECTION LOGIC
-      let detectedSettings: Partial<PluginSettings> = {};
-      let detectionLog = "";
-      if (hasFiles) {
-          detectedSettings = detectProjectSettings(loadedProject.files);
-          if (detectedSettings.platform) detectionLog += ` Plataforma: ${detectedSettings.platform}.`;
-          if (detectedSettings.buildSystem) detectionLog += ` Build: ${detectedSettings.buildSystem}.`;
-          if (detectedSettings.javaVersion) detectionLog += ` Java: ${detectedSettings.javaVersion}.`;
-          if (detectionLog) addLog(`Auto-Detecção:${detectionLog}`);
+      // 1. Tentar carregar estado existente (.minegen/state.json)
+      addLog(`Sistema: Verificando configurações salvas em "${handle.name}"...`);
+      const existingState = await loadProjectStateFromDisk(handle);
+
+      if (existingState) {
+          addLog("Sistema: Projeto existente encontrado! Restaurando estado...");
+          // Atualizar lista de projetos e selecionar
+          setProjects(prev => {
+              // Verifica se já existe na lista para não duplicar
+              const exists = prev.find(p => p.id === existingState.id);
+              if (exists) return prev.map(p => p.id === existingState.id ? existingState : p);
+              return [existingState, ...prev];
+          });
+          
+          setCurrentProjectId(existingState.id);
+          setDirectoryHandle(handle);
+          await saveDirectoryHandleToDB(existingState.id, handle);
+          
+          // Re-ler arquivos do disco para garantir sincronia (caso tenham sido editados externamente)
+          const liveFiles = await readProjectFromDisk(handle);
+          handleProjectGenerated(liveFiles); // Atualiza os arquivos no estado
+
+      } else {
+          // 2. Projeto Novo ou Importação sem histórico MineGen
+          addLog(`Sistema: Nenhum histórico encontrado. Analisando estrutura...`);
+          const loadedProject = await readProjectFromDisk(handle);
+          const hasFiles = loadedProject.files.length > 0;
+          addLog(`Sistema: ${loadedProject.files.length} arquivos encontrados.`);
+          
+          // AUTO DETECTION LOGIC
+          let detectedSettings: Partial<PluginSettings> = {};
+          let detectionLog = "";
+          if (hasFiles) {
+              detectedSettings = detectProjectSettings(loadedProject.files);
+              if (detectedSettings.platform) detectionLog += ` Plataforma: ${detectedSettings.platform}.`;
+              if (detectedSettings.buildSystem) detectionLog += ` Build: ${detectedSettings.buildSystem}.`;
+              if (detectedSettings.javaVersion) detectionLog += ` Java: ${detectedSettings.javaVersion}.`;
+              if (detectionLog) addLog(`Auto-Detecção:${detectionLog}`);
+          }
+
+          const newId = generateUUID();
+          
+          const newProject: SavedProject = {
+            id: newId,
+            name: detectedSettings.name || handle.name || "Novo Projeto",
+            lastModified: Date.now(),
+            settings: { 
+                ...DEFAULT_SETTINGS, 
+                name: detectedSettings.name || handle.name || DEFAULT_SETTINGS.name,
+                ...detectedSettings 
+            },
+            messages: [{
+              role: 'model',
+              text: hasFiles 
+                ? `📁 Pasta **${handle.name}** importada com sucesso!\n\n` +
+                  `🔍 **Análise Automática**:\n` +
+                  (detectedSettings.platform ? `- Plataforma: ${detectedSettings.platform}\n` : '') +
+                  (detectedSettings.buildSystem ? `- Build: ${detectedSettings.buildSystem}\n` : '') +
+                  (detectedSettings.javaVersion ? `- Java: ${detectedSettings.javaVersion}\n` : '') +
+                  `\nEncontrei ${loadedProject.files.length} arquivos. O histórico será salvo na pasta \`.minegen\`.`
+                : `📁 Pasta **${handle.name}** vinculada (Vazia).\nO que você gostaria de criar hoje?`
+            }],
+            generatedProject: hasFiles ? loadedProject : null
+          };
+
+          setProjects(prev => [newProject, ...prev]);
+          setCurrentProjectId(newProject.id);
+          setDirectoryHandle(handle);
+          await saveDirectoryHandleToDB(newId, handle);
+          // O useEffect de Auto-Save vai criar o .minegen logo em seguida
       }
-
-      const newId = generateUUID();
-      
-      const newProject: SavedProject = {
-        id: newId,
-        name: detectedSettings.name || handle.name || "Novo Projeto",
-        lastModified: Date.now(),
-        settings: { 
-            ...DEFAULT_SETTINGS, 
-            name: detectedSettings.name || handle.name || DEFAULT_SETTINGS.name,
-            ...detectedSettings // Override defaults with detected values
-        },
-        messages: [{
-          role: 'model',
-          text: hasFiles 
-            ? `📁 Pasta **${handle.name}** importada com sucesso!\n\n` +
-              `🔍 **Análise Automática**:\n` +
-              (detectedSettings.platform ? `- Plataforma: ${detectedSettings.platform}\n` : '') +
-              (detectedSettings.buildSystem ? `- Build: ${detectedSettings.buildSystem}\n` : '') +
-              (detectedSettings.javaVersion ? `- Java: ${detectedSettings.javaVersion}\n` : '') +
-              `\nEncontrei ${loadedProject.files.length} arquivos. O que você gostaria de modificar?`
-            : `📁 Pasta **${handle.name}** vinculada (Vazia).\nO que você gostaria de criar hoje?`
-        }],
-        generatedProject: hasFiles ? loadedProject : null
-      };
-
-      setProjects(prev => [newProject, ...prev]);
-      setCurrentProjectId(newProject.id);
-      
-      setDirectoryHandle(handle);
-      await saveDirectoryHandleToDB(newId, handle);
 
       if (window.innerWidth < 768) setSidebarOpen(false);
 
     } catch (error: any) {
       if (error.name !== 'AbortError') {
-        alert("Erro ao criar projeto: " + error.message);
+        alert("Erro ao abrir projeto: " + error.message);
         addLog(`Erro: ${error.message}`);
       }
     }
   };
 
   const deleteProject = (id: string) => {
-    if (!window.confirm("Tem certeza que deseja excluir este projeto?")) return;
+    if (!window.confirm("Tem certeza que deseja remover este projeto da lista? (Arquivos no disco não serão deletados)")) return;
     const newProjects = projects.filter(p => p.id !== id);
     setProjects(newProjects);
     if (currentProjectId === id) {
       if (newProjects.length > 0) setCurrentProjectId(newProjects[0].id);
       else setCurrentProjectId(null);
     }
-    addLog("Sistema: Projeto excluído.");
+    addLog("Sistema: Projeto removido da lista.");
   };
 
   const updateActiveProject = useCallback((updates: Partial<SavedProject>) => {
@@ -219,7 +268,7 @@ const App: React.FC = () => {
   const handleProjectGenerated = (generated: GeneratedProject) => {
     if (!activeProject) return;
 
-    addLog(`Sistema: Atualizando ${generated.files.length} arquivos no projeto...`);
+    // addLog(`Sistema: Atualizando ${generated.files.length} arquivos no projeto...`); // Verbose
 
     let mergedFiles: GeneratedFile[] = [];
 
@@ -231,10 +280,10 @@ const App: React.FC = () => {
         const existingIndex = mergedFiles.findIndex(f => f.path === newFile.path);
         if (existingIndex !== -1) {
           mergedFiles[existingIndex] = newFile;
-          addLog(`Arquivo atualizado: ${newFile.path}`);
+          // addLog(`Arquivo atualizado: ${newFile.path}`);
         } else {
           mergedFiles.push(newFile);
-          addLog(`Arquivo criado: ${newFile.path}`);
+          addLog(`Arquivo detectado: ${newFile.path}`);
         }
       });
     } else {
@@ -254,7 +303,7 @@ const App: React.FC = () => {
       } 
     });
     
-    addLog("Sistema: Projeto atualizado com sucesso.");
+    // addLog("Sistema: Projeto atualizado com sucesso.");
   };
 
   // Trigger from CodeViewer
@@ -281,7 +330,7 @@ const App: React.FC = () => {
         projects={projects}
         currentProjectId={currentProjectId}
         onSelectProject={(id) => { setCurrentProjectId(id); addLog(`Sistema: Projeto trocado para ID ${id.substring(0,8)}`); }}
-        onCreateProject={handleCreateNewProject}
+        onCreateProject={handleOpenOrNewProject} // Both buttons trigger same FS logic
         onDeleteProject={deleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
         setSettings={handleSettingsChange}
@@ -323,7 +372,10 @@ const App: React.FC = () => {
              <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">
                 <Menu className="w-12 h-12 opacity-20" />
                 <h2 className="text-lg font-medium text-[#cccccc]">Sem projeto aberto</h2>
-                <button onClick={handleCreateNewProject} className="bg-[#007acc] text-white px-4 py-2 rounded shadow-sm hover:bg-[#0062a3] text-sm">Abrir Pasta</button>
+                <div className="flex gap-2">
+                    <button onClick={handleOpenOrNewProject} className="bg-[#007acc] text-white px-4 py-2 rounded shadow-sm hover:bg-[#0062a3] text-sm">Novo Projeto</button>
+                    <button onClick={handleOpenOrNewProject} className="bg-[#333] text-white px-4 py-2 rounded shadow-sm hover:bg-[#444] text-sm">Abrir Pasta</button>
+                </div>
              </div>
           )}
         </div>
