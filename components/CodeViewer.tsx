@@ -28,7 +28,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
   const selectedFile = files.find(f => f.path === selectedFilePath) || null;
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Sync content when file selection changes
   useEffect(() => {
     if (project && files.length > 0) {
       if (!selectedFilePath || !files.some(f => f.path === selectedFilePath)) {
@@ -47,7 +46,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     }
   }, [selectedFile, selectedFilePath]);
 
-  // Focus prompt input when modal opens
   useEffect(() => {
     if (isPromptOpen && promptInputRef.current) {
         setTimeout(() => promptInputRef.current?.focus(), 100);
@@ -58,7 +56,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     if (!selectedFile || !directoryHandle) return;
     
     try {
-        // Ensure permission before saving (needs user gesture)
         const hasPerm = await verifyPermission(directoryHandle, true);
         if (!hasPerm) return;
 
@@ -119,7 +116,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
       }
   };
 
-  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -131,7 +127,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [fileContent, selectedFile]);
 
-  // Context Menu
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     const selection = window.getSelection()?.toString();
@@ -144,7 +139,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
 
   if (!project) {
     return (
-        <div className="flex-1 flex flex-col items-center justify-center bg-[#1e1e1e] text-[#555]">
+        <div className="flex-1 flex flex-col items-center justify-center bg-[#1e1e1e] text-[#555] h-full">
             <div className="w-24 h-24 mb-4 opacity-10 bg-no-repeat bg-center" style={{ backgroundImage: 'url(https://raw.githubusercontent.com/microsoft/vscode/main/resources/linux/code.png)', backgroundSize: 'contain' }}></div>
             <p className="text-sm font-sans">Abra uma pasta para começar a editar</p>
         </div>
@@ -152,9 +147,9 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
   }
 
   return (
-    <div className="flex w-full h-full bg-[#1e1e1e] overflow-hidden select-none relative" onClick={closeContextMenu}>
+    <div className="flex w-full h-full bg-[#1e1e1e] overflow-hidden select-none relative flex-col md:flex-row" onClick={closeContextMenu}>
       {/* Sidebar - Explorer */}
-      <div className="w-64 bg-[#252526] flex flex-col border-r border-[#2b2b2b] shrink-0">
+      <div className="w-full md:w-64 bg-[#252526] flex flex-col border-b md:border-b-0 md:border-r border-[#2b2b2b] shrink-0 h-48 md:h-full">
         <div className="h-9 px-4 flex items-center text-[11px] font-bold text-[#bbbbbb] uppercase tracking-wide shrink-0">
             Explorer
         </div>
@@ -181,7 +176,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
       </div>
       
       {/* Main Editor Area */}
-      <div className="flex-1 flex flex-col bg-[#1e1e1e] min-w-0">
+      <div className="flex-1 flex flex-col bg-[#1e1e1e] min-w-0 h-full">
         {/* Tab Bar */}
         {selectedFile ? (
             <div className="h-9 bg-[#1e1e1e] flex items-center border-b border-[#2b2b2b] shrink-0 overflow-x-auto no-scrollbar">
@@ -199,7 +194,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                         title="Enviar código selecionado para o Agente"
                      >
                         <MessageSquarePlus className="w-3.5 h-3.5" />
-                        <span>Enviar p/ Agente</span>
+                        <span className="hidden sm:inline">Enviar p/ Agente</span>
                      </button>
                      <div className="w-[1px] h-4 bg-[#333] mx-1"></div>
                     <button 
@@ -217,7 +212,7 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
         )}
 
         {/* Editor Content */}
-        <div className="flex-1 relative overflow-hidden group">
+        <div className="flex-1 relative overflow-hidden group h-full">
             {selectedFile ? (
                 <textarea
                     ref={textAreaRef}
@@ -254,10 +249,6 @@ const CodeViewer: React.FC<CodeViewerProps> = ({ project, settings, directoryHan
                         className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#094771] hover:text-white flex items-center gap-2"
                     >
                         <MessageSquarePlus className="w-3 h-3" /> Adicionar ao Chat...
-                    </button>
-                    <div className="h-[1px] bg-[#454545] my-1 mx-2"></div>
-                    <button className="w-full text-left px-3 py-1.5 text-xs text-[#cccccc] hover:bg-[#094771] hover:text-white opacity-50 cursor-not-allowed">
-                        Copiar
                     </button>
                 </div>
             )}

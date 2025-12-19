@@ -79,10 +79,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   useEffect(() => {
     const checkAndSync = async () => {
       if (directoryHandle && !currentProject && !isReading) {
-          // Check permission state first without requesting (requesting requires user gesture)
           try {
              const opts = { mode: 'readwrite' };
-             // @ts-ignore - queryPermission is valid on FileSystemHandle
+             // @ts-ignore
              const status = await directoryHandle.queryPermission(opts);
              
              if (status === 'granted') {
@@ -100,7 +99,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     checkAndSync();
   }, [directoryHandle, currentProject]);
 
-  // Watch for external pending messages (From CodeViewer)
   useEffect(() => {
     if (pendingMessage) {
         handleAddToQueue(pendingMessage);
@@ -108,7 +106,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [pendingMessage]);
 
-  // Queue Processor
   useEffect(() => {
     const processNextInQueue = async () => {
       if (isLoading || queue.length === 0) return;
@@ -131,7 +128,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleAuthorize = async () => {
       if (!directoryHandle) return;
-      // This is called via click, so verifyPermission (which calls requestPermission) is allowed
       const hasPerm = await verifyPermission(directoryHandle, true);
       if (hasPerm) {
           setNeedsPermission(false);
@@ -142,8 +138,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const syncProjectFiles = async (handle: any, notifyUser: boolean = true) => {
     setIsReading(true);
     try {
-      // NOTE: requestPermission must be called in a gesture. 
-      // syncProjectFiles is now safe to call if we know permission is granted OR if called from a button click.
       const loadedProject = await readProjectFromDisk(handle);
       onProjectGenerated(loadedProject);
       
@@ -172,7 +166,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const handle = await getDirectoryHandle();
       onSetDirectoryHandle(handle);
       setNeedsPermission(false);
-      // New handle implies granted permission usually
       await syncProjectFiles(handle, true);
       return handle;
     } catch (error: any) {
@@ -201,8 +194,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setLoadingText('Escrevendo alterações...');
       setIsSaving(true);
 
-      // Verify permission one last time before saving (although queue should imply it, better safe)
-      // Note: We cannot request permission here (async), so we assume it was handled via the authorize button
       await saveProjectToDisk(directoryHandle, project);
       
       setIsSaving(false);
@@ -246,30 +237,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
     Array.from(files).forEach(file => {
       const reader = new FileReader();
-      
       if (file.type.startsWith('image/')) {
         reader.readAsDataURL(file);
-        reader.onload = () => {
-          setAttachments(prev => [...prev, {
-            type: 'image',
-            name: file.name,
-            content: reader.result as string
-          }]);
-        };
+        reader.onload = () => setAttachments(prev => [...prev, { type: 'image', name: file.name, content: reader.result as string }]);
       } else {
-        // Assume text for everything else for context
         reader.readAsText(file);
-        reader.onload = () => {
-          setAttachments(prev => [...prev, {
-            type: 'text',
-            name: file.name,
-            content: reader.result as string
-          }]);
-        };
+        reader.onload = () => setAttachments(prev => [...prev, { type: 'text', name: file.name, content: reader.result as string }]);
       }
     });
-    
-    // Clear input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -283,7 +258,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     let currentHandle = directoryHandle;
 
     if (!currentHandle) {
-       // Se veio via prompt do CodeViewer, talvez já tenha handle, mas se não tiver:
        const confirmSelect = window.confirm("Selecione a pasta do projeto para permitir que o Agente IA gerencie os arquivos.");
        if (!confirmSelect) return;
        currentHandle = await handleSelectFolder();
@@ -295,15 +269,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         return;
     }
 
-    const userMessage: ChatMessage = { 
-        role: 'user', 
-        text: text,
-        attachments: [...attachments] // copy
-    };
+    const userMessage: ChatMessage = { role: 'user', text: text, attachments: [...attachments] };
     
     setMessages(prev => [...prev, userMessage]);
     setQueue(prev => [...prev, { text, att: [...attachments] }]);
-    
     setInput('');
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -322,22 +291,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full relative z-10 bg-[#1e1e1e]">
-       {/* Toolbar Header */}
-       <div className="absolute top-2 right-4 z-10 flex gap-2">
-         {directoryHandle && (
-            <button 
-              onClick={() => handleAuthorize()} // Use handleAuthorize to cover re-sync
-              title="Sincronizar arquivos do disco"
-              className={`p-2 rounded-md hover:bg-[#333] transition-colors ${isReading ? 'text-blue-400 animate-spin' : 'text-gray-400'}`}
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-         )}
-        <button onClick={() => setMessages([])} className="text-gray-400 hover:text-red-400 p-2 rounded-md hover:bg-[#333] transition-colors"><Trash2 className="w-4 h-4" /></button>
-      </div>
-      
-      {/* Permission Banner */}
+    <div className="flex flex-col h-full bg-[#1e1e1e] relative min-w-0">
+       
+       {/* Permission Banner (Fixed at top of chat) */}
       {needsPermission && directoryHandle && (
           <div className="bg-blue-900/40 border-b border-blue-500/30 p-3 flex items-center justify-between animate-fade-in shrink-0">
               <div className="flex items-center gap-2 text-sm text-blue-200">
@@ -353,15 +309,32 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 pb-24 custom-scrollbar">
+      {/* Toolbar Header (Overlay) */}
+       <div className="absolute top-2 right-4 z-10 flex gap-2 pointer-events-none">
+         <div className="pointer-events-auto flex gap-2">
+            {directoryHandle && (
+                <button 
+                onClick={() => handleAuthorize()} 
+                title="Sincronizar arquivos do disco"
+                className={`p-2 rounded-md hover:bg-[#333] transition-colors ${isReading ? 'text-blue-400 animate-spin' : 'text-gray-400'}`}
+                >
+                <RefreshCw className="w-4 h-4" />
+                </button>
+            )}
+            <button onClick={() => setMessages([])} className="text-gray-400 hover:text-red-400 p-2 rounded-md hover:bg-[#333] transition-colors"><Trash2 className="w-4 h-4" /></button>
+         </div>
+      </div>
+      
+      {/* Messages Area (Flex Grow) */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar min-w-0">
         {messages.map((msg, idx) => (
             <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                 <div className={`w-8 h-8 rounded flex items-center justify-center flex-shrink-0 mt-1 ${msg.role === 'model' ? 'bg-[#007acc]' : 'bg-[#333]'}`}>
                     {msg.isError ? <AlertCircle className="w-5 h-5 text-red-200" /> : msg.role === 'model' ? <Bot className="w-5 h-5 text-white" /> : <User className="w-5 h-5 text-gray-300" />}
                 </div>
                 
-                <div className={`max-w-[85%] flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`px-4 py-2.5 rounded text-sm whitespace-pre-wrap leading-6 shadow-sm ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'}`}>
+                <div className={`max-w-[85%] flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'} min-w-0`}>
+                    <div className={`px-4 py-2.5 rounded text-sm whitespace-pre-wrap leading-6 shadow-sm break-words max-w-full ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'}`}>
                         {msg.text}
                         {msg.projectData && (
                             <div className="mt-2 pt-2 border-t border-[#444] text-xs text-green-400 flex items-center gap-1">
@@ -370,7 +343,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         )}
                     </div>
                     
-                    {/* Attachments Display in Message */}
                     {msg.attachments && msg.attachments.length > 0 && (
                         <div className="flex flex-wrap gap-2">
                             {msg.attachments.map((att, i) => (
@@ -388,12 +360,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {isLoading && (
             <div className="flex gap-3 animate-pulse">
                 <div className="w-8 h-8 rounded bg-[#007acc] flex items-center justify-center mt-1"><Cpu className="w-5 h-5 text-white" /></div>
-                <div className="bg-[#252526] border border-[#333] rounded px-4 py-3 text-sm text-[#999] font-mono flex flex-col gap-2 min-w-[250px]">
+                <div className="bg-[#252526] border border-[#333] rounded px-4 py-3 text-sm text-[#999] font-mono flex flex-col gap-2 min-w-[200px] max-w-full">
                      <div className="flex items-center gap-2">
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-[#007acc]" />
                         <span>{loadingText} ({Math.round(progress)}%)</span>
                      </div>
-                     <div className="text-xs text-[#666] italic pl-5">
+                     <div className="text-xs text-[#666] italic pl-5 truncate">
                          {REASONING_STEPS[reasoningStep]}
                      </div>
                 </div>
@@ -402,8 +374,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div className="absolute bottom-0 left-0 right-0 p-3 bg-[#1e1e1e] border-t border-[#333] z-20">
+      {/* Input Area (Static at Bottom) */}
+      <div className="shrink-0 p-3 bg-[#1e1e1e] border-t border-[#333] z-20">
         
         {/* Attachment Previews */}
         {attachments.length > 0 && (
@@ -427,7 +399,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex gap-2">
+        <form onSubmit={handleSubmit} className="flex gap-2 items-end">
            <input 
              type="file" 
              multiple 
@@ -438,7 +410,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
            <button 
              type="button" 
              onClick={() => fileInputRef.current?.click()}
-             className="text-gray-400 hover:text-white p-2 rounded hover:bg-[#333] transition-colors"
+             className="text-gray-400 hover:text-white p-2 rounded hover:bg-[#333] transition-colors mb-[1px]"
              title="Anexar arquivo ou imagem"
            >
              <Paperclip className="w-5 h-5" />
@@ -454,7 +426,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             className="flex-1 bg-[#252526] text-[#cccccc] rounded border border-[#333] px-3 py-2 text-sm focus:outline-none focus:border-[#007acc] resize-none custom-scrollbar"
             style={{ minHeight: '38px', maxHeight: '150px' }} 
           />
-          <button type="submit" disabled={!input.trim() && attachments.length === 0} className="bg-[#007acc] hover:bg-[#0062a3] text-white rounded px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+          <button type="submit" disabled={!input.trim() && attachments.length === 0} className="bg-[#007acc] hover:bg-[#0062a3] text-white rounded px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-[1px]">
              <Send className="w-4 h-4" />
           </button>
         </form>

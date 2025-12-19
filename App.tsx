@@ -240,21 +240,21 @@ const App: React.FC = () => {
   // Trigger from CodeViewer
   const handleAddToContext = (fullMessage: string) => {
      addLog("Usuário: Instrução enviada para processamento pelo Agente.");
-     // Não atualizamos as mensagens aqui diretamente, deixamos o ChatInterface fazer isso
-     // ao processar a "pendingAiMessage", garantindo que entre na fila de execução.
      setPendingAiMessage(fullMessage);
   };
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
 
-  if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Loading workspace...</div>;
+  if (!isLoaded) return <div className="bg-[#1e1e1e] h-[100dvh] w-full flex items-center justify-center text-gray-500 font-mono">Loading workspace...</div>;
 
   return (
-    <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
+    <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
+      {/* Mobile Backdrop */}
       {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
+        <div className="fixed inset-0 bg-black/50 z-20 md:hidden transition-opacity" onClick={() => setSidebarOpen(false)} />
       )}
 
+      {/* Sidebar Component */}
       <Sidebar 
         isOpen={sidebarOpen}
         toggleSidebar={toggleSidebar}
@@ -267,17 +267,23 @@ const App: React.FC = () => {
         setSettings={handleSettingsChange}
       />
 
-      <div className="flex-1 flex flex-col md:flex-row h-full relative z-10 overflow-hidden">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col md:flex-row h-full relative z-10 overflow-hidden min-w-0">
+        
+        {/* Mobile Header */}
         <div className="md:hidden h-12 border-b border-[#2b2b2b] flex items-center px-4 bg-[#252526] z-10 flex-shrink-0 justify-between">
           <div className="flex items-center">
-            <button onClick={toggleSidebar} className="text-gray-300 mr-3">
+            <button onClick={toggleSidebar} className="text-gray-300 mr-3 p-1 hover:bg-[#333] rounded">
               <Menu className="w-5 h-5" />
             </button>
-            <span className="font-semibold text-white truncate max-w-[200px]">{activeProject?.name || "MineGen AI"}</span>
+            <span className="font-semibold text-white truncate max-w-[200px] text-sm">
+              {activeProject?.name || "MineGen AI"}
+            </span>
           </div>
         </div>
 
-        <div className="flex-1 md:w-[35%] md:flex-none border-r border-[#2b2b2b] h-full overflow-hidden bg-[#1e1e1e] flex flex-col">
+        {/* Left Panel: Chat Interface */}
+        <div className="flex-1 md:w-[35%] md:flex-none border-r border-[#2b2b2b] h-full overflow-hidden bg-[#1e1e1e] flex flex-col min-w-0 relative">
           {activeProject ? (
             <ChatInterface 
               key={activeProject.id}
@@ -302,9 +308,9 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* Right Area: CodeViewer + Terminal */}
-        <div className="hidden md:flex flex-1 md:w-[65%] h-full overflow-hidden bg-[#1e1e1e] flex-col relative">
-          <div className="flex-1 overflow-hidden relative">
+        {/* Right Panel: CodeViewer + Terminal */}
+        <div className="hidden md:flex flex-1 md:w-[65%] h-full overflow-hidden bg-[#1e1e1e] flex-col relative min-w-0">
+          <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
              <CodeViewer 
               project={activeProject?.generatedProject || null} 
               settings={activeProject?.settings || DEFAULT_SETTINGS}
