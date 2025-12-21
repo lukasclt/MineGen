@@ -2,17 +2,23 @@
 import { Platform, JavaVersion, PluginSettings, BuildSystem } from './types';
 
 export const AI_PROVIDERS = {
+  AIMLAPI: {
+    id: 'aimlapi',
+    name: 'AIML API',
+    url: 'https://api.aimlapi.com/v1',
+    defaultModel: 'alibaba/qwen3-coder-480b-a35b-instruct'
+  },
   OPENROUTER: {
     id: 'openrouter',
     name: 'OpenRouter',
     url: 'https://openrouter.ai/api/v1',
-    defaultModel: 'gpt-oss-120b' // Modelo sugerido pelo usuário
+    defaultModel: 'gpt-oss-120b' 
   },
   CEREBRAS: {
     id: 'cerebras',
     name: 'Cerebras',
     url: 'https://api.cerebras.ai/v1',
-    defaultModel: 'llama3.1-70b' // Modelo extremamente rápido da Cerebras
+    defaultModel: 'llama3.1-70b' 
   },
   SILICONFLOW: {
     id: 'siliconflow',
@@ -33,8 +39,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   buildSystem: BuildSystem.MAVEN,
   description: "Um plugin legal gerado por IA.",
   author: "MineGenAI",
-  aiModel: AI_PROVIDERS.OPENROUTER.defaultModel, 
-  aiUrl: AI_PROVIDERS.OPENROUTER.url,
+  aiModel: AI_PROVIDERS.AIMLAPI.defaultModel, 
+  aiUrl: AI_PROVIDERS.AIMLAPI.url,
   apiKey: "", // Custom API Key
   enableSounds: true,
   enableTTS: true 

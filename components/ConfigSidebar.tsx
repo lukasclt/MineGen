@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
 import { MC_VERSIONS, AI_PROVIDERS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -30,7 +30,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
     setSettings(prev => ({ ...prev, [field]: value }));
   };
 
-  const applyProvider = (provider: typeof AI_PROVIDERS.OPENROUTER) => {
+  const applyProvider = (provider: any) => {
       setSettings(prev => ({
           ...prev,
           aiUrl: provider.url,
@@ -169,6 +169,13 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
               </label>
               
               <div className="grid grid-cols-2 gap-2 mb-2">
+                 <button
+                    onClick={() => applyProvider(AI_PROVIDERS.AIMLAPI)}
+                    disabled={isConfigDisabled}
+                    className={`flex items-center justify-center gap-1 py-2 px-2 rounded text-[10px] font-bold border transition-colors ${settings.aiUrl === AI_PROVIDERS.AIMLAPI.url ? 'bg-mc-accent/20 text-mc-accent border-mc-accent' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'} disabled:opacity-50 col-span-2`}
+                 >
+                    <Rocket className="w-3 h-3" /> AIML API
+                 </button>
                  <button
                     onClick={() => applyProvider(AI_PROVIDERS.OPENROUTER)}
                     disabled={isConfigDisabled}
