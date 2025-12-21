@@ -32,6 +32,7 @@ export interface PluginSettings {
   author: string;
   aiModel?: string;
   aiUrl?: string; // Base URL for the AI Provider
+  apiKey?: string; // Custom API Key per project
   // Audio Settings
   enableSounds: boolean;
   enableTTS: boolean;

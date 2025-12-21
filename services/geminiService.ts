@@ -5,18 +5,22 @@ import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIE
 
 // Cache para o cliente para não recriar a cada request se as settings não mudarem
 let client: OpenAI | null = null;
-let lastBaseUrl: string | null = null;
+let lastConfigSignature: string | null = null;
 
 const getClient = (settings: PluginSettings) => {
-    const baseUrl = settings.aiUrl || "https://api.siliconflow.cn/v1"; // Fallback safe
+    const baseUrl = settings.aiUrl || "https://api.siliconflow.cn/v1"; 
+    const apiKey = settings.apiKey || process.env.API_KEY;
     
-    if (!client || lastBaseUrl !== baseUrl) {
+    // Assinatura única baseada na URL e na Key para detectar mudanças
+    const configSignature = `${baseUrl}|${apiKey}`;
+    
+    if (!client || lastConfigSignature !== configSignature) {
         client = new OpenAI({
             baseURL: baseUrl,
-            apiKey: process.env.API_KEY,
+            apiKey: apiKey,
             dangerouslyAllowBrowser: true,
         });
-        lastBaseUrl = baseUrl;
+        lastConfigSignature = configSignature;
     }
     return client;
 };

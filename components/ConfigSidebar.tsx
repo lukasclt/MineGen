@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -168,6 +168,18 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                   onChange={(e) => handleChange('aiUrl', e.target.value)}
                   disabled={isConfigDisabled}
                   placeholder="https://openrouter.ai/api/v1"
+                  className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white font-mono disabled:opacity-50 mb-2"
+                />
+              </div>
+
+              <div>
+                <span className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><Key className="w-3 h-3" /> API Key</span>
+                 <input
+                  type="password"
+                  value={settings.apiKey || ''}
+                  onChange={(e) => handleChange('apiKey', e.target.value)}
+                  disabled={isConfigDisabled}
+                  placeholder="sk-..."
                   className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white font-mono disabled:opacity-50 mb-2"
                 />
               </div>

@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   author: "MineGenAI",
   aiModel: "gpt-oss-120b", // Updated per request
   aiUrl: "https://api.siliconflow.cn/v1", // Updated to SiliconFlow default
+  apiKey: "", // Custom API Key
   enableSounds: true,
   enableTTS: true 
 };
