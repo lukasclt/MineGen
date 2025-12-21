@@ -4,17 +4,13 @@ import { PluginSettings, GeneratedProject, Attachment, BuildSystem } from "../ty
 import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
 const client = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
+  baseURL: "https://api.cerebras.ai/v1",
   apiKey: process.env.API_KEY,
   dangerouslyAllowBrowser: true,
-  defaultHeaders: {
-    "HTTP-Referer": typeof window !== 'undefined' ? window.location.origin : "https://minegen.ai",
-    "X-Title": "MineGen AI",
-  }
 });
 
 const getModel = (settings?: PluginSettings) => {
-  return settings?.aiModel || "google/gemini-2.0-flash-001";
+  return settings?.aiModel || "llama-3.3-70b";
 };
 
 const parseJSON = (text: string) => {
@@ -176,13 +172,15 @@ ${agentCapabilities}
     let project: GeneratedProject;
 
     // Tentativa 1: Enviar imagens diretamente (Multimodal)
+    // Cerebras Llama 3.3/3.1 são text-only. Isso vai cair no catch quase sempre se tiver imagem.
     try {
         project = await executeCall(buildPayload(false));
     } catch (error: any) {
-        // Se o erro for de suporte a imagem ou 404 (endpoint not found for images)
-        const isImageError = error.status === 404 || error.status === 400 || (error.message && error.message.toLowerCase().includes('image'));
+        // Se o erro for de suporte a imagem ou 404/400 vindo da API da Cerebras
+        const isImageError = error.status === 404 || error.status === 400 || (error.message && error.message.toLowerCase().includes('image')) || (error.message && error.message.toLowerCase().includes('multimodal'));
+        
         if (isImageError) {
-          console.log("Modelo não suporta imagem ou endpoint inválido, tentando OCR fallback...");
+          console.log("Modelo/API não suporta imagem, tentando OCR fallback...");
           const ocrResult = await performOCR(attachments);
           project = await executeCall(buildPayload(true, ocrResult));
         } else {
