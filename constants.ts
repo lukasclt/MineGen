@@ -1,6 +1,27 @@
 
 import { Platform, JavaVersion, PluginSettings, BuildSystem } from './types';
 
+export const AI_PROVIDERS = {
+  OPENROUTER: {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    url: 'https://openrouter.ai/api/v1',
+    defaultModel: 'gpt-oss-120b' // Modelo sugerido pelo usuário
+  },
+  CEREBRAS: {
+    id: 'cerebras',
+    name: 'Cerebras',
+    url: 'https://api.cerebras.ai/v1',
+    defaultModel: 'llama3.1-70b' // Modelo extremamente rápido da Cerebras
+  },
+  SILICONFLOW: {
+    id: 'siliconflow',
+    name: 'SiliconFlow',
+    url: 'https://api.siliconflow.cn/v1',
+    defaultModel: 'gpt-oss-120b'
+  }
+};
+
 export const DEFAULT_SETTINGS: PluginSettings = {
   name: "MeuPluginIncrivel",
   groupId: "com.exemplo",
@@ -12,8 +33,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   buildSystem: BuildSystem.MAVEN,
   description: "Um plugin legal gerado por IA.",
   author: "MineGenAI",
-  aiModel: "gpt-oss-120b", // Updated per request
-  aiUrl: "https://api.siliconflow.cn/v1", // Updated to SiliconFlow default
+  aiModel: AI_PROVIDERS.OPENROUTER.defaultModel, 
+  aiUrl: AI_PROVIDERS.OPENROUTER.url,
   apiKey: "", // Custom API Key
   enableSounds: true,
   enableTTS: true 

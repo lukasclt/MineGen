@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
-import { MC_VERSIONS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key } from 'lucide-react';
+import { MC_VERSIONS, AI_PROVIDERS } from '../constants';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -28,6 +28,14 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
 
   const handleChange = (field: keyof PluginSettings, value: any) => {
     setSettings(prev => ({ ...prev, [field]: value }));
+  };
+
+  const applyProvider = (provider: typeof AI_PROVIDERS.OPENROUTER) => {
+      setSettings(prev => ({
+          ...prev,
+          aiUrl: provider.url,
+          aiModel: provider.defaultModel
+      }));
   };
 
   const isConfigDisabled = !currentProjectId;
@@ -160,6 +168,23 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 <Cpu className="w-3 h-3" /> API Provider
               </label>
               
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                 <button
+                    onClick={() => applyProvider(AI_PROVIDERS.OPENROUTER)}
+                    disabled={isConfigDisabled}
+                    className={`flex items-center justify-center gap-1 py-2 px-2 rounded text-[10px] font-bold border transition-colors ${settings.aiUrl === AI_PROVIDERS.OPENROUTER.url ? 'bg-mc-accent/20 text-mc-accent border-mc-accent' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'} disabled:opacity-50`}
+                 >
+                    <Globe className="w-3 h-3" /> OpenRouter
+                 </button>
+                 <button
+                    onClick={() => applyProvider(AI_PROVIDERS.CEREBRAS)}
+                    disabled={isConfigDisabled}
+                    className={`flex items-center justify-center gap-1 py-2 px-2 rounded text-[10px] font-bold border transition-colors ${settings.aiUrl === AI_PROVIDERS.CEREBRAS.url ? 'bg-mc-accent/20 text-mc-accent border-mc-accent' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'} disabled:opacity-50`}
+                 >
+                    <Zap className="w-3 h-3" /> Cerebras
+                 </button>
+              </div>
+
               <div>
                 <span className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><Globe className="w-3 h-3" /> API Base URL</span>
                  <input
