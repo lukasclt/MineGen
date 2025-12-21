@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem } from '../types';
 import { MC_VERSIONS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -122,7 +122,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                </div>
             )}
             
-            {/* Audio Settings (New) */}
+            {/* Audio Settings */}
             <div className="space-y-3 bg-gray-800/30 p-3 rounded-lg border border-gray-700/50">
                <label className="text-xs font-semibold text-mc-accent uppercase tracking-wider flex items-center gap-1">
                 <Volume2 className="w-3 h-3" /> Áudio & Voz
@@ -157,8 +157,21 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
             {/* AI Config */}
             <div className="space-y-3 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
                <label className="text-xs font-semibold text-mc-gold uppercase tracking-wider flex items-center gap-1">
-                <Cpu className="w-3 h-3" /> API (OpenRouter)
+                <Cpu className="w-3 h-3" /> API Provider
               </label>
+              
+              <div>
+                <span className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><Globe className="w-3 h-3" /> API Base URL</span>
+                 <input
+                  type="text"
+                  value={settings.aiUrl || ''}
+                  onChange={(e) => handleChange('aiUrl', e.target.value)}
+                  disabled={isConfigDisabled}
+                  placeholder="https://openrouter.ai/api/v1"
+                  className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white font-mono disabled:opacity-50 mb-2"
+                />
+              </div>
+
               <div>
                 <span className="text-xs text-gray-400 mb-1 block">Modelo ID</span>
                  <input
@@ -166,7 +179,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                   value={settings.aiModel || ''}
                   onChange={(e) => handleChange('aiModel', e.target.value)}
                   disabled={isConfigDisabled}
-                  placeholder="google/gemini-2.0-flash-001"
+                  placeholder="gpt-oss-120b"
                   className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs focus:border-mc-gold focus:outline-none text-white font-mono disabled:opacity-50"
                 />
               </div>
@@ -305,7 +318,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
             <Download className="w-4 h-4" /> Instalar App
           </button>
         )}
-        <p className="text-xs text-gray-500 text-center">MineGen AI v2.2 (OpenRouter + Audio)</p>
+        <p className="text-xs text-gray-500 text-center">MineGen AI v2.3 (Multi-Provider)</p>
       </div>
     </div>
   );

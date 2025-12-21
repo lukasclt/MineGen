@@ -3,14 +3,26 @@ import OpenAI from 'openai';
 import { PluginSettings, GeneratedProject, Attachment, BuildSystem } from "../types";
 import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
-const client = new OpenAI({
-  baseURL: "https://api.cerebras.ai/v1",
-  apiKey: process.env.API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+// Cache para o cliente para não recriar a cada request se as settings não mudarem
+let client: OpenAI | null = null;
+let lastBaseUrl: string | null = null;
+
+const getClient = (settings: PluginSettings) => {
+    const baseUrl = settings.aiUrl || "https://api.siliconflow.cn/v1"; // Fallback safe
+    
+    if (!client || lastBaseUrl !== baseUrl) {
+        client = new OpenAI({
+            baseURL: baseUrl,
+            apiKey: process.env.API_KEY,
+            dangerouslyAllowBrowser: true,
+        });
+        lastBaseUrl = baseUrl;
+    }
+    return client;
+};
 
 const getModel = (settings?: PluginSettings) => {
-  return settings?.aiModel || "llama-3.3-70b";
+  return settings?.aiModel || "gpt-oss-120b";
 };
 
 const parseJSON = (text: string) => {
@@ -23,33 +35,6 @@ const parseJSON = (text: string) => {
   }
 };
 
-// OCR Helper Function
-const performOCR = async (attachments: Attachment[]): Promise<string> => {
-  const images = attachments.filter(a => a.type === 'image');
-  if (images.length === 0) return "";
-
-  try {
-    // @ts-ignore - Loaded via importmap
-    const { createWorker } = await import('tesseract.js');
-    const worker = await createWorker('eng'); 
-    
-    let transcription = "\n\n--- TRANSCRIÇÃO AUTOMÁTICA DE IMAGENS (OCR) ---\n";
-    
-    for (const img of images) {
-       // Convert base64 to something Tesseract handles if needed, but it usually handles data URIs
-       const { data: { text } } = await worker.recognize(img.content);
-       transcription += `\n[Imagem: ${img.name}]\n${text}\n`;
-    }
-    
-    await worker.terminate();
-    transcription += "\n------------------------------------------------\n";
-    return transcription;
-  } catch (e) {
-    console.warn("OCR Failed:", e);
-    return "\n[AVISO SISTEMA: Falha ao ler texto da imagem. A imagem foi ignorada pois o modelo atual não suporta visão.]\n";
-  }
-};
-
 export const generatePluginCode = async (
   prompt: string, 
   settings: PluginSettings,
@@ -57,6 +42,8 @@ export const generatePluginCode = async (
   attachments: Attachment[] = []
 ): Promise<GeneratedProject> => {
   const model = getModel(settings);
+  const apiClient = getClient(settings);
+
   let userPromptContext = "";
 
   const agentCapabilities = `
@@ -102,11 +89,11 @@ ${agentCapabilities}
   }
 
   // Montar payload com anexos
-  const buildPayload = (forceTextOnly: boolean = false, ocrText: string = "") => {
-    const contentPayload: any[] = [{ type: "text", text: userPromptContext + ocrText }];
+  const buildPayload = () => {
+    const contentPayload: any[] = [{ type: "text", text: userPromptContext }];
 
     for (const att of attachments) {
-      if (att.type === 'image' && !forceTextOnly) {
+      if (att.type === 'image') {
         contentPayload.push({
           type: "image_url",
           image_url: {
@@ -130,7 +117,7 @@ ${agentCapabilities}
 
     while (attempts < maxAttempts) {
       try {
-        const completion = await client.chat.completions.create({
+        const completion = await apiClient.chat.completions.create({
           model: model,
           messages: [
             { role: "system", content: SYSTEM_INSTRUCTION },
@@ -169,28 +156,12 @@ ${agentCapabilities}
   };
 
   try {
-    let project: GeneratedProject;
-
-    // Tentativa 1: Enviar imagens diretamente (Multimodal)
-    // Cerebras Llama 3.3/3.1 são text-only. Isso vai cair no catch quase sempre se tiver imagem.
-    try {
-        project = await executeCall(buildPayload(false));
-    } catch (error: any) {
-        // Se o erro for de suporte a imagem ou 404/400 vindo da API da Cerebras
-        const isImageError = error.status === 404 || error.status === 400 || (error.message && error.message.toLowerCase().includes('image')) || (error.message && error.message.toLowerCase().includes('multimodal'));
-        
-        if (isImageError) {
-          console.log("Modelo/API não suporta imagem, tentando OCR fallback...");
-          const ocrResult = await performOCR(attachments);
-          project = await executeCall(buildPayload(true, ocrResult));
-        } else {
-            throw error;
-        }
-    }
+    // Envio direto do payload (Multimodal nativo) sem fallback para OCR
+    const project = await executeCall(buildPayload());
 
     // --- PÓS-PROCESSAMENTO: Injeção do Gradle Wrapper ---
     if (settings.buildSystem === BuildSystem.GRADLE) {
-        const hasGradlew = project.files.some(f => f.path === 'gradlew' || f.path === 'gradlew.bat');
+        const hasGradlew = project.files.some((f: any) => f.path === 'gradlew' || f.path === 'gradlew.bat');
         
         if (!hasGradlew) {
             // Injetar wrapper padrão para facilitar a vida do usuário

@@ -31,6 +31,7 @@ export interface PluginSettings {
   description: string;
   author: string;
   aiModel?: string;
+  aiUrl?: string; // Base URL for the AI Provider
   // Audio Settings
   enableSounds: boolean;
   enableTTS: boolean;

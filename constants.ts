@@ -12,9 +12,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   buildSystem: BuildSystem.MAVEN,
   description: "Um plugin legal gerado por IA.",
   author: "MineGenAI",
-  aiModel: "llama-3.3-70b", // Default for Cerebras
+  aiModel: "gpt-oss-120b", // Updated per request
+  aiUrl: "https://api.siliconflow.cn/v1", // Updated to SiliconFlow default
   enableSounds: true,
-  enableTTS: true // TTS habilitado por padrão e volume 100%
+  enableTTS: true 
 };
 
 export const MC_VERSIONS = [
