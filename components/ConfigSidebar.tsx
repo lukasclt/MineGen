@@ -39,8 +39,6 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
   const [isInviting, setIsInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [generatedLink, setGeneratedLink] = useState('');
-  const [linkCopied, setLinkCopied] = useState(false);
 
   const handleChange = (field: keyof PluginSettings, value: any) => {
     setSettings(prev => ({ ...prev, [field]: value }));
@@ -67,36 +65,13 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
       playSound('success');
       onInviteMember(inviteEmail); 
       setInviteEmail('');
-      alert(`Convite enviado para ${inviteEmail}!`);
+      alert(`Convite enviado para ${inviteEmail}! O usuário receberá uma notificação aqui no MineGen.`);
     } catch (err: any) {
       playSound('error');
       setInviteError(err.message || "Erro ao enviar convite.");
     } finally {
       setIsInviting(false);
     }
-  };
-
-  const handleGenerateLink = async () => {
-    if (!currentUser || !activeProject) return;
-    setIsInviting(true);
-    try {
-        const token = await dbService.createInviteLink(activeProject.id, currentUser.id);
-        const url = `${window.location.origin}?invite=${token}`;
-        setGeneratedLink(url);
-        playSound('success');
-    } catch (e: any) {
-        setInviteError(e.message || "Erro ao gerar link");
-        playSound('error');
-    } finally {
-        setIsInviting(false);
-    }
-  };
-
-  const copyLink = () => {
-      navigator.clipboard.writeText(generatedLink);
-      setLinkCopied(true);
-      playSound('click');
-      setTimeout(() => setLinkCopied(false), 2000);
   };
 
   return (
@@ -195,6 +170,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
             <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-700">
                <label className="text-xs font-bold text-white mb-3 block flex items-center gap-2"><UserPlus className="w-4 h-4 text-mc-green" /> Convidar Colaborador</label>
                <form onSubmit={handleInviteSubmit} className="space-y-2">
+                  <p className="text-[10px] text-gray-400 mb-2">Digite o e-mail do usuário. Ele receberá uma notificação aqui no sistema.</p>
                   <input
                     type="email"
                     placeholder="e-mail do usuário..."
@@ -214,31 +190,6 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                     {isInviting ? "Verificando..." : "Enviar Convite"}
                   </button>
                </form>
-               
-               <div className="relative flex py-2 items-center">
-                  <div className="flex-grow border-t border-gray-700"></div>
-                  <span className="flex-shrink-0 mx-2 text-[10px] text-gray-500">OU</span>
-                  <div className="flex-grow border-t border-gray-700"></div>
-               </div>
-
-               <div className="space-y-2">
-                 {generatedLink ? (
-                   <div className="bg-black/40 rounded border border-gray-600 p-2 flex items-center gap-2">
-                     <div className="flex-1 truncate text-[10px] text-mc-accent font-mono">{generatedLink}</div>
-                     <button onClick={copyLink} className="text-gray-400 hover:text-white">
-                        {linkCopied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                     </button>
-                   </div>
-                 ) : (
-                   <button 
-                     onClick={handleGenerateLink} 
-                     disabled={isConfigDisabled}
-                     className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white font-bold text-xs py-2 rounded transition-all flex items-center justify-center gap-2"
-                   >
-                     <Link className="w-3.5 h-3.5" /> Gerar Link de Convite
-                   </button>
-                 )}
-               </div>
             </div>
 
             <div className="space-y-3">
