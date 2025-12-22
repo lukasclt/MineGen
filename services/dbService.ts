@@ -22,137 +22,306 @@ export interface Invite {
   status: 'pending' | 'accepted' | 'rejected';
 }
 
+// --- MOCK DB LOCAL (Para quando o Backend estiver Offline) ---
+const LocalDB = {
+  getUsers: (): User[] => JSON.parse(localStorage.getItem('minegen_db_users') || '[]'),
+  saveUser: (user: User) => {
+    const users = LocalDB.getUsers();
+    const idx = users.findIndex(u => u.id === user.id);
+    if (idx !== -1) users[idx] = user;
+    else users.push(user);
+    localStorage.setItem('minegen_db_users', JSON.stringify(users));
+  },
+  findUserByEmail: (email: string) => LocalDB.getUsers().find(u => u.email === email),
+  
+  getProjects: (): SavedProject[] => JSON.parse(localStorage.getItem('minegen_db_projects') || '[]'),
+  saveProject: (project: SavedProject) => {
+    const projects = LocalDB.getProjects();
+    const idx = projects.findIndex(p => p.id === project.id);
+    if (idx !== -1) projects[idx] = project;
+    else projects.push(project);
+    localStorage.setItem('minegen_db_projects', JSON.stringify(projects));
+  },
+  deleteProject: (id: string) => {
+    const projects = LocalDB.getProjects().filter(p => p.id !== id);
+    localStorage.setItem('minegen_db_projects', JSON.stringify(projects));
+  },
+  
+  // Convites simples locais
+  getInvites: (): Invite[] => JSON.parse(localStorage.getItem('minegen_db_invites') || '[]'),
+  saveInvite: (invite: Invite) => {
+    const invites = LocalDB.getInvites();
+    invites.push(invite);
+    localStorage.setItem('minegen_db_invites', JSON.stringify(invites));
+  }
+};
+
+/**
+ * Tenta fazer fetch no backend. Se falhar (Network Error, 404, 50x), executa a função de fallback.
+ */
+async function tryFetch<T>(
+  url: string, 
+  options: RequestInit | undefined, 
+  fallback: () => Promise<T> | T
+): Promise<T> {
+  try {
+    const response = await fetch(url, options);
+    
+    // Se o backend responder erro 404 (endpoint não existe) ou 5xx (erro interno/proxy), vai pro fallback
+    if (response.status === 404 || response.status >= 500) {
+      console.warn(`[Offline Mode] Backend unreachable (${response.status}) for ${url}. Using LocalDB.`);
+      return await fallback();
+    }
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.message || "Erro na requisição.");
+    }
+
+    return await response.json();
+  } catch (e: any) {
+    // Se for erro de rede (fetch failed), vai pro fallback
+    if (e.message === 'Failed to fetch' || e.message.includes('NetworkError') || e.message.includes('conexão')) {
+       console.warn(`[Offline Mode] Network error for ${url}. Using LocalDB.`);
+       return await fallback();
+    }
+    throw e; // Se for erro de lógica (ex: senha errada retornada pelo backend), lança o erro.
+  }
+}
+
 export const dbService = {
   
   // --- AUTH ---
 
   async registerUser(userData: Partial<User>, password?: string): Promise<User> {
-    const response = await fetch(`${API_BASE}/auth/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...userData, password })
-    });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.message || "Erro ao registrar. Verifique sua conexão.");
-    }
-    return await response.json();
+    return tryFetch(
+      `${API_BASE}/auth/register`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...userData, password })
+      },
+      () => {
+        // Fallback Local
+        if (LocalDB.findUserByEmail(userData.email!)) {
+           throw new Error("E-mail já cadastrado (Modo Offline).");
+        }
+        const newUser: User = { 
+            id: 'local-' + Math.random().toString(36).substr(2, 9),
+            username: userData.username!,
+            email: userData.email!,
+            savedApiKey: userData.savedApiKey
+        };
+        LocalDB.saveUser(newUser);
+        return newUser;
+      }
+    );
   },
 
   async loginUser(email: string, password?: string): Promise<User> {
-    const response = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-    if (!response.ok) {
-       const err = await response.json().catch(() => ({}));
-       throw new Error(err.message || "Credenciais inválidas.");
-    }
-    return await response.json();
+    return tryFetch(
+      `${API_BASE}/auth/login`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      },
+      () => {
+        // Fallback Local (Senha ignorada no mock local para simplicidade, ou poderia salvar hash)
+        const user = LocalDB.findUserByEmail(email);
+        if (!user) throw new Error("Usuário não encontrado (Modo Offline).");
+        return user;
+      }
+    );
   },
 
   async updateUser(user: User): Promise<User> {
-    const response = await fetch(`${API_BASE}/users/${user.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(user)
-    });
-    if (!response.ok) throw new Error("Falha ao atualizar");
-    return await response.json();
+    return tryFetch(
+      `${API_BASE}/users/${user.id}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user)
+      },
+      () => {
+        LocalDB.saveUser(user);
+        return user;
+      }
+    );
   },
 
   async deleteUser(userId: string): Promise<boolean> {
-    const response = await fetch(`${API_BASE}/users/${userId}`, { method: 'DELETE' });
-    return response.ok;
+    return tryFetch(
+      `${API_BASE}/users/${userId}`,
+      { method: 'DELETE' },
+      () => {
+         const users = LocalDB.getUsers().filter(u => u.id !== userId);
+         localStorage.setItem('minegen_db_users', JSON.stringify(users));
+         return true;
+      }
+    );
   },
 
   // --- PROJETOS ---
 
   async saveProject(project: SavedProject): Promise<boolean> {
-    try {
-      const response = await fetch(`${API_BASE}/projects/${project.id}`, {
+    return tryFetch(
+      `${API_BASE}/projects/${project.id}`,
+      {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(project)
-      });
-      return response.ok;
-    } catch (e) { return false; }
+      },
+      () => {
+        LocalDB.saveProject(project);
+        return true;
+      }
+    );
   },
 
   async loadUserProjects(userId: string): Promise<SavedProject[]> {
-    try {
-      const response = await fetch(`${API_BASE}/projects?ownerId=${userId}`);
-      if (!response.ok) return [];
-      return await response.json();
-    } catch (e) { return []; }
+    return tryFetch(
+      `${API_BASE}/projects?ownerId=${userId}`,
+      undefined,
+      () => {
+        // Filtra projetos onde o usuário é dono OU membro
+        const user = LocalDB.getUsers().find(u => u.id === userId);
+        const email = user ? user.email : '';
+        return LocalDB.getProjects().filter(p => p.ownerId === userId || (p.members && p.members.includes(email)));
+      }
+    );
   },
 
   async deleteProject(projectId: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
-      return response.ok;
-    } catch (e) { return false; }
+    return tryFetch(
+      `${API_BASE}/projects/${projectId}`,
+      { method: 'DELETE' },
+      () => {
+        LocalDB.deleteProject(projectId);
+        return true;
+      }
+    );
   },
 
   // --- CONVITES ---
 
   async sendInvite(projectId: string, projectName: string, senderId: string, senderName: string, targetEmail: string): Promise<boolean> {
-    const response = await fetch(`${API_BASE}/invites/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, projectName, senderId, senderName, targetEmail })
-    });
-
-    if (response.status === 404) throw new Error("Usuário não encontrado.");
-    if (!response.ok) throw new Error("Erro ao enviar convite.");
-    
-    return true;
+    return tryFetch(
+      `${API_BASE}/invites/send`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, projectName, senderId, senderName, targetEmail })
+      },
+      () => {
+        // Fallback Local: Verifica se usuário destino existe localmente
+        const target = LocalDB.findUserByEmail(targetEmail);
+        if (!target) throw new Error("Usuário não encontrado (Modo Offline - certifique-se que ele se registrou neste navegador).");
+        
+        const invite: Invite = {
+           id: 'inv-' + Math.random().toString(36).substr(2),
+           projectId, projectName, senderId, senderName, targetEmail,
+           status: 'pending'
+        };
+        LocalDB.saveInvite(invite);
+        return true;
+      }
+    );
   },
 
   async createInviteLink(projectId: string, createdBy: string): Promise<string> {
-    const response = await fetch(`${API_BASE}/invites/link`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, createdBy })
-    });
-    if (!response.ok) throw new Error("Erro ao criar link.");
-    const data = await response.json();
-    return data.token;
+    return tryFetch(
+      `${API_BASE}/invites/link`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, createdBy })
+      },
+      () => {
+         // Fallback Link: Gera um token falso que o 'joinProjectByLink' local vai reconhecer
+         const token = `local-link-${projectId}-${Date.now()}`;
+         // Salvar token em localStorage se quisesse validar, mas para mock simplificado vamos embutir o ID no token
+         return token;
+      }
+    );
   },
 
   async joinProjectByLink(token: string, userEmail: string): Promise<SavedProject> {
-    const response = await fetch(`${API_BASE}/invites/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, userEmail })
-    });
-    
-    if (!response.ok) {
-       const err = await response.json();
-       throw new Error(err.message || "Erro ao entrar via link.");
-    }
-    return await response.json();
+    return tryFetch(
+      `${API_BASE}/invites/join`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, userEmail })
+      },
+      () => {
+         // Lógica local para link
+         if (!token.startsWith('local-link-')) throw new Error("Link inválido ou de ambiente diferente.");
+         const parts = token.split('-');
+         const projectId = parts[2]; // local-link-ID-DATE
+         
+         const projects = LocalDB.getProjects();
+         const projectIdx = projects.findIndex(p => p.id === projectId);
+         
+         if (projectIdx === -1) throw new Error("Projeto não encontrado (Local).");
+         
+         const project = projects[projectIdx];
+         if (!project.members) project.members = [];
+         if (!project.members.includes(userEmail)) {
+             project.members.push(userEmail);
+             projects[projectIdx] = project;
+             localStorage.setItem('minegen_db_projects', JSON.stringify(projects));
+         }
+         return project;
+      }
+    );
   },
 
   async checkPendingInvites(userEmail: string): Promise<Invite[]> {
-    try {
-      const response = await fetch(`${API_BASE}/invites/pending?email=${encodeURIComponent(userEmail)}`);
-      if (!response.ok) return [];
-      return await response.json();
-    } catch (e) { return []; }
+    return tryFetch(
+      `${API_BASE}/invites/pending?email=${encodeURIComponent(userEmail)}`,
+      undefined,
+      () => {
+        return LocalDB.getInvites().filter(i => i.targetEmail === userEmail && i.status === 'pending');
+      }
+    );
   },
 
   async respondToInvite(inviteId: string, accept: boolean): Promise<SavedProject | null> {
-    try {
-      const response = await fetch(`${API_BASE}/invites/${inviteId}/respond`, {
+    return tryFetch(
+      `${API_BASE}/invites/${inviteId}/respond`,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accept })
-      });
-      if (!response.ok) return null;
-      if (accept) return await response.json();
-      return null;
-    } catch (e) { return null; }
+      },
+      () => {
+        const invites = LocalDB.getInvites();
+        const inviteIdx = invites.findIndex(i => i.id === inviteId);
+        if (inviteIdx === -1) return null;
+        
+        const invite = invites[inviteIdx];
+        
+        // Remove convite
+        invites.splice(inviteIdx, 1);
+        localStorage.setItem('minegen_db_invites', JSON.stringify(invites));
+        
+        if (accept) {
+           const projects = LocalDB.getProjects();
+           const pIdx = projects.findIndex(p => p.id === invite.projectId);
+           if (pIdx !== -1) {
+              const project = projects[pIdx];
+              if (!project.members) project.members = [];
+              if (!project.members.includes(invite.targetEmail)) {
+                  project.members.push(invite.targetEmail);
+                  projects[pIdx] = project;
+                  localStorage.setItem('minegen_db_projects', JSON.stringify(projects));
+              }
+              return project;
+           }
+        }
+        return null;
+      }
+    );
   }
 };
