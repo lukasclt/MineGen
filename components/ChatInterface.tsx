@@ -34,7 +34,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser
 }) => {
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  // isLoading agora é derivado, mas mantemos para controle de input local
+  const [isLocalProcessing, setIsLocalProcessing] = useState(false);
   const [reasoningStep, setReasoningStep] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [queue, setQueue] = useState<{id: string, text: string, att: Attachment[]}[]>([]);
@@ -42,9 +43,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Detecta se há alguma mensagem sendo processada (seja por mim ou outro usuário)
+  const processingMessage = messages.find(m => m.status === 'processing' && m.role === 'model');
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading, reasoningStep]);
+  }, [messages, reasoningStep, processingMessage]);
+
+  // Ciclo de animação dos passos (Simulado localmente para quem vê)
+  useEffect(() => {
+    let interval: any;
+    if (processingMessage) {
+        // Se a mensagem 'processing' acabou de aparecer, reseta o step visualmente
+        if (reasoningStep === 0) setReasoningStep(0);
+        
+        interval = setInterval(() => {
+            setReasoningStep(prev => {
+                if (prev < REASONING_STEPS.length - 1) return prev + 1;
+                return prev;
+            });
+        }, 1500);
+    } else {
+        setReasoningStep(0);
+    }
+    return () => clearInterval(interval);
+  }, [processingMessage]);
 
   useEffect(() => {
     if (pendingMessage) {
@@ -55,34 +78,43 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     const processQueue = async () => {
-      if (isLoading || queue.length === 0) return;
+      if (isLocalProcessing || queue.length === 0) return;
+      
       const { id, text, att } = queue[0];
       setQueue(prev => prev.slice(1));
-      setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'processing' as const } : m));
-      await executeAiGeneration(text, att, id);
+      
+      // Atualiza status da mensagem do usuário para 'done' (foi enviada)
+      setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'done' as const } : m));
+      
+      await executeAiGeneration(text, att);
     };
     processQueue();
-  }, [queue, isLoading]);
+  }, [queue, isLocalProcessing]);
 
-  const executeAiGeneration = async (text: string, currentAttachments: Attachment[], messageId?: string) => {
-    setIsLoading(true);
+  const executeAiGeneration = async (text: string, currentAttachments: Attachment[]) => {
+    setIsLocalProcessing(true);
     setReasoningStep(0);
     
-    const stepInterval = setInterval(() => {
-        setReasoningStep(prev => {
-            if (prev < REASONING_STEPS.length - 1) return prev + 1;
-            return prev;
-        });
-    }, 1500);
+    // ID temporário para a resposta do modelo
+    const modelMsgId = generateUUID();
+
+    // 1. Inserir Placeholder de Processamento (Isso sincroniza com o banco via App.tsx)
+    setMessages(prev => [
+        ...prev, 
+        { 
+            id: modelMsgId,
+            role: 'model', 
+            text: '', 
+            status: 'processing', // Isso ativa a UI de loading para TODOS
+            senderName: 'Agente IA'
+        }
+    ]);
 
     try {
       const project = await generatePluginCode(text, settings, currentProject, currentAttachments, currentUser);
-      clearInterval(stepInterval);
-      setReasoningStep(REASONING_STEPS.length - 1); 
       
       let saveWarning = "";
       
-      // Tenta salvar, mas não bloqueia se falhar (ex: falta de permissão no F5)
       if (directoryHandle) {
         try {
             await saveProjectToDisk(directoryHandle, project);
@@ -94,49 +126,49 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       onProjectGenerated(project);
 
-      setMessages((prev: ChatMessage[]): ChatMessage[] => {
-        const updated = prev.map(m => m.id === messageId ? { ...m, status: 'done' as const } : m);
-        const modelResponse: ChatMessage = { 
-            role: 'model', 
-            text: project.explanation + saveWarning, 
-            projectData: project, 
-            status: 'done' 
-        };
-        return [...updated, modelResponse];
-      });
+      // 2. Atualizar mensagem para Concluído (Sincroniza o resultado final)
+      setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
+          ...m, 
+          text: project.explanation + saveWarning, 
+          projectData: project, 
+          status: 'done' 
+      } : m));
 
       if (settings.enableSounds) playSound('success');
       if (settings.enableTTS) speakText(project.explanation);
 
     } catch (error: any) {
-      clearInterval(stepInterval);
-      setMessages(prev => {
-        const updated = prev.map(m => m.id === messageId ? { ...m, status: 'done' as const, isError: true } : m);
-        return [...updated, { 
-            role: 'model', 
-            text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
-            isError: true, 
-            status: 'done' 
-        }];
-      });
+      // Em caso de erro, atualiza a mensagem placeholder
+      setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
+          ...m,
+          text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
+          isError: true, 
+          status: 'done' 
+      } : m));
+
       if (settings.enableSounds) playSound('error');
     } finally {
-      setIsLoading(false);
+      setIsLocalProcessing(false);
     }
   };
 
   const handleAddToQueue = (text: string) => {
     if (!text.trim() && attachments.length === 0) return;
-    const msgId = Date.now().toString();
+    const msgId = generateUUID();
+    
     const userMessage: ChatMessage = { 
         id: msgId, role: 'user', text, attachments: [...attachments], status: 'queued',
         senderId: currentUser?.id, senderName: currentUser?.username || 'Convidado'
     };
+    
     setMessages(prev => [...prev, userMessage]);
     setQueue(prev => [...prev, { id: msgId, text, att: [...attachments] }]);
     setInput('');
     setAttachments([]);
   };
+
+  // Helper UUID
+  const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
   const progressPercent = Math.min(100, Math.round(((reasoningStep + 1) / REASONING_STEPS.length) * 100));
 
@@ -148,39 +180,41 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 mt-1 shadow-md ${msg.role === 'model' ? (msg.isError ? 'bg-red-600' : 'bg-[#007acc]') : 'bg-gray-700 border border-gray-600'}`}>
               {msg.role === 'model' ? (msg.isError ? <AlertCircle className="w-5 h-5 text-white" /> : <Bot className="w-5 h-5 text-white" />) : <UserIcon className="w-4 h-4 text-white" />}
             </div>
+            
             <div className={`max-w-[85%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className="flex items-center gap-1.5 px-1">
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{msg.senderName || (msg.role === 'model' ? 'Agente IA' : 'Usuário')}</span>
                 {msg.role === 'user' && msg.senderId && <Shield className="w-2.5 h-2.5 text-mc-accent" />}
               </div>
-              <div className={`px-4 py-2.5 rounded-lg text-sm shadow-sm relative ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'} ${msg.isError ? 'border-red-500/50 bg-red-900/20 text-red-200' : ''}`}>
-                <div className="whitespace-pre-wrap">{msg.text}</div>
-                {msg.status === 'queued' && <div className="absolute -bottom-5 right-0 text-[10px] text-gray-500 bg-black/40 px-1.5 rounded-full"><Clock className="w-3 h-3 inline mr-1" /> Na Fila</div>}
-              </div>
+              
+              {/* Se a mensagem for do Modelo e estiver 'processing', mostra a animação no lugar do texto */}
+              {msg.role === 'model' && msg.status === 'processing' ? (
+                  <div className="flex gap-3 animate-fade-in w-full">
+                     <div className="bg-[#252526] border border-[#333] rounded-lg p-3 w-64 shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
+                             <Loader2 className="w-3 h-3 animate-spin" /> 
+                             Gerando... {progressPercent}%
+                           </span>
+                           <span className="text-[10px] text-gray-500">{REASONING_STEPS[reasoningStep]}</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                           <div 
+                             className="h-full bg-mc-accent transition-all duration-500 ease-out"
+                             style={{ width: `${progressPercent}%` }}
+                           ></div>
+                        </div>
+                     </div>
+                  </div>
+              ) : (
+                  <div className={`px-4 py-2.5 rounded-lg text-sm shadow-sm relative ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'} ${msg.isError ? 'border-red-500/50 bg-red-900/20 text-red-200' : ''}`}>
+                    <div className="whitespace-pre-wrap">{msg.text}</div>
+                    {msg.status === 'queued' && <div className="absolute -bottom-5 right-0 text-[10px] text-gray-500 bg-black/40 px-1.5 rounded-full"><Clock className="w-3 h-3 inline mr-1" /> Na Fila</div>}
+                  </div>
+              )}
             </div>
           </div>
         ))}
-        
-        {isLoading && (
-          <div className="flex gap-3 animate-fade-in">
-             <div className="w-8 h-8 rounded bg-[#007acc] flex items-center justify-center mt-1 animate-pulse"><Cpu className="w-5 h-5 text-white" /></div>
-             <div className="bg-[#252526] border border-[#333] rounded-lg p-3 w-64 shadow-lg">
-                <div className="flex items-center justify-between mb-2">
-                   <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
-                     <Loader2 className="w-3 h-3 animate-spin" /> 
-                     Gerando... {progressPercent}%
-                   </span>
-                   <span className="text-[10px] text-gray-500">{REASONING_STEPS[reasoningStep]}</span>
-                </div>
-                <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                   <div 
-                     className="h-full bg-mc-accent transition-all duration-500 ease-out"
-                     style={{ width: `${progressPercent}%` }}
-                   ></div>
-                </div>
-             </div>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
 

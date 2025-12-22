@@ -24,7 +24,6 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [directoryHandle, setDirectoryHandle] = useState<any>(null);
-  // Estado para controlar se temos permissão de escrita no handle atual
   const [hasFilePermission, setHasFilePermission] = useState<boolean>(false);
   
   const [isTerminalOpen, setIsTerminalOpen] = useState(true);
@@ -61,28 +60,9 @@ const App: React.FC = () => {
           setCurrentUser(user);
           setIsCloudSyncing(true);
           try {
-            const cloudProjects = await dbService.loadUserProjects(user.id);
-            if (cloudProjects.length > 0) {
-              setProjects(prevLocal => {
-                const merged = [...prevLocal];
-                const sanitizedCloud = cloudProjects.map(p => ({...p, members: p.members || []}));
-
-                sanitizedCloud.forEach(cloudP => {
-                  const localIdx = merged.findIndex(p => p.id === cloudP.id);
-                  if (localIdx === -1) {
-                    merged.push(cloudP);
-                  } else {
-                    if (cloudP.lastModified > merged[localIdx].lastModified) {
-                       merged[localIdx] = cloudP;
-                    }
-                  }
-                });
-                return merged;
-              });
-              addLog("Sistema: Sincronização com nuvem concluída.");
-            }
+            await syncWithCloud(user.id);
           } catch (err) {
-            addLog("Aviso: Falha ao conectar na nuvem. Usando versão offline.");
+            addLog("Aviso: Falha ao conectar na nuvem.");
           } finally {
             setIsCloudSyncing(false);
           }
@@ -96,6 +76,29 @@ const App: React.FC = () => {
     };
     init();
   }, []);
+
+  const syncWithCloud = async (userId: string) => {
+    const cloudProjects = await dbService.loadUserProjects(userId);
+    if (cloudProjects.length > 0) {
+      setProjects(prevLocal => {
+        const merged = [...prevLocal];
+        const sanitizedCloud = cloudProjects.map(p => ({...p, members: p.members || []}));
+
+        sanitizedCloud.forEach(cloudP => {
+          const localIdx = merged.findIndex(p => p.id === cloudP.id);
+          if (localIdx === -1) {
+            merged.push(cloudP);
+          } else {
+            // Lógica de merge: Se a nuvem for mais recente OU se tiver mais mensagens (sincronia de chat)
+            if (cloudP.lastModified > merged[localIdx].lastModified || cloudP.messages.length > merged[localIdx].messages.length) {
+               merged[localIdx] = cloudP;
+            }
+          }
+        });
+        return merged;
+      });
+    }
+  };
 
   const checkInviteLink = async (user: User) => {
       const urlParams = new URLSearchParams(window.location.search);
@@ -122,8 +125,21 @@ const App: React.FC = () => {
       }
   };
 
+  // POLLING DE SINCRONIZAÇÃO
+  // Aumenta a frequência quando tem projeto ativo para suportar o "Real-time" da animação
   useEffect(() => {
     if (!currentUser) return;
+    
+    // Intervalo de sync de projetos (chat, arquivos)
+    const syncIntervalTime = currentProjectId ? 2000 : 8000; // 2s se ativo, 8s se inativo
+
+    const syncLoop = async () => {
+        if (!document.hidden) { // Apenas se a aba estiver visível
+            await syncWithCloud(currentUser.id);
+        }
+    };
+
+    // Intervalo de convites
     const checkInvites = async () => {
       const invites = await dbService.checkPendingInvites(currentUser.email);
       if (invites.length > 0 && !incomingInvite) {
@@ -133,9 +149,15 @@ const App: React.FC = () => {
         speakText(`Você tem um novo convite de ${invite.senderName} para o projeto ${invite.projectName}`);
       }
     };
-    const interval = setInterval(checkInvites, 5000); 
-    return () => clearInterval(interval);
-  }, [currentUser, incomingInvite]);
+
+    const intervalSync = setInterval(syncLoop, syncIntervalTime);
+    const intervalInvite = setInterval(checkInvites, 5000);
+
+    return () => {
+        clearInterval(intervalSync);
+        clearInterval(intervalInvite);
+    };
+  }, [currentUser, incomingInvite, currentProjectId]); // Depende de currentProjectId para mudar a velocidade
 
   useEffect(() => {
     if (isLoaded) {
@@ -150,7 +172,6 @@ const App: React.FC = () => {
     }
   }, [projects, currentUser, isLoaded, currentProjectId]);
 
-  // Carrega handle e verifica permissão
   useEffect(() => {
     const loadHandle = async () => {
       setDirectoryHandle(null);
@@ -160,7 +181,6 @@ const App: React.FC = () => {
         const saved = await getDirectoryHandleFromDB(currentProjectId);
         if (saved) {
              setDirectoryHandle(saved);
-             // Verifica status da permissão (sem pedir prompt)
              const status = await checkPermissionStatus(saved);
              setHasFilePermission(status === 'granted');
         }
@@ -186,23 +206,7 @@ const App: React.FC = () => {
   const handleAuthSuccess = async (user: User) => {
     setCurrentUser(user);
     setIsCloudSyncing(true);
-    try {
-        const cloudProjects = await dbService.loadUserProjects(user.id);
-        if (cloudProjects.length > 0) {
-          setProjects(prev => {
-             const merged = [...prev];
-             const sanitized = cloudProjects.map(p => ({...p, members: p.members || []}));
-             sanitized.forEach(cp => {
-                 const idx = merged.findIndex(p => p.id === cp.id);
-                 if (idx === -1) merged.push(cp);
-                 else if (cp.lastModified > merged[idx].lastModified) merged[idx] = cp;
-             });
-             return merged;
-          });
-        }
-    } catch(e) {
-        addLog("Erro ao sincronizar login: " + e);
-    }
+    await syncWithCloud(user.id);
     setIsCloudSyncing(false);
     setIsAuthModalOpen(false);
     addLog(`Sistema: Bem-vindo, ${user.username}!`);
@@ -272,7 +276,7 @@ const App: React.FC = () => {
           });
           setCurrentProjectId(safeExisting.id);
           setDirectoryHandle(handle);
-          setHasFilePermission(true); // Acabamos de abrir, então temos permissão
+          setHasFilePermission(true);
           await saveDirectoryHandleToDB(safeExisting.id, handle);
       } else {
           const loaded = await readProjectFromDisk(handle);
@@ -334,7 +338,6 @@ const App: React.FC = () => {
   return (
     <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
-        {/* Aviso de Reconexão de Pasta */}
         {directoryHandle && !hasFilePermission && (
              <button 
                 onClick={handleReconnectFolder}
