@@ -10,7 +10,8 @@ export default defineConfig(({ mode }) => {
     base: '/',
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || ""),
-      'process.env.API_URL': JSON.stringify(env.API_URL || env.VITE_API_URL || "http://localhost:3000")
+      // Se não houver variável definida, deixamos vazio para o dbService ativar o modo LocalStorage automaticamente
+      'process.env.API_URL': JSON.stringify(env.API_URL || env.VITE_API_URL || "") 
     },
     build: {
       outDir: 'dist',
