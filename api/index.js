@@ -1,15 +1,16 @@
 
-const express = require('express');
-const cors = require('cors');
-const { put, list, head } = require('@vercel/blob');
-const fetch = require('node-fetch'); // Necessário para ambiente Node antigo, Vercel moderno já tem global
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import { put, list } from '@vercel/blob';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const app = express();
 
-// Configuração CORS para permitir acesso do Frontend
+// Configuração CORS
 app.use(cors({
-  origin: '*', // Em produção, restrinja para seu domínio
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -19,12 +20,12 @@ app.use(express.json({ limit: '50mb' }));
 const DB_FILENAME = 'minegen_database.json';
 const INITIAL_DB = { users: [], projects: [], invites: [] };
 
-// --- Helpers do Vercel Blob ---
+// --- Vercel Blob Helpers ---
 
 async function getDBUrl() {
-  // Tenta encontrar a URL do arquivo no Blob Storage
   try {
     const { blobs } = await list();
+    // Encontra o arquivo exato
     const dbBlob = blobs.find(b => b.pathname === DB_FILENAME);
     return dbBlob ? dbBlob.url : null;
   } catch (e) {
@@ -34,22 +35,21 @@ async function getDBUrl() {
 }
 
 async function readDB() {
-  // Se não houver token, usa memória volátil (modo fallback local sem .env)
+  // Fallback para memória se não houver token (Dev Local sem .env)
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    console.warn("BLOB_READ_WRITE_TOKEN não encontrado. Usando banco em memória (dados serão perdidos ao reiniciar).");
-    if (!global.memoryDB) global.memoryDB = JSON.parse(JSON.stringify(INITIAL_DB));
-    return global.memoryDB;
+    if (!(global).memoryDB) (global).memoryDB = JSON.parse(JSON.stringify(INITIAL_DB));
+    return (global).memoryDB;
   }
 
   try {
     const url = await getDBUrl();
     if (!url) {
-      // Cria o arquivo se não existir
       await writeDB(INITIAL_DB);
       return INITIAL_DB;
     }
 
-    const response = await fetch(url + '?timestamp=' + Date.now()); // Anti-cache
+    // Cache busting com timestamp
+    const response = await fetch(`${url}?t=${Date.now()}`);
     if (!response.ok) throw new Error('Falha ao baixar DB');
     return await response.json();
   } catch (error) {
@@ -59,32 +59,32 @@ async function readDB() {
 }
 
 async function writeDB(data) {
+  // Fallback para memória
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    global.memoryDB = data;
+    (global).memoryDB = data;
     return;
   }
 
   try {
-    // access: 'public' permite leitura via URL, mas escrita requer token
-    // addRandomSuffix: false garante que sobrescrevemos o mesmo arquivo
+    // Escreve usando Vercel Blob conforme documentação
     await put(DB_FILENAME, JSON.stringify(data, null, 2), { 
       access: 'public', 
-      addRandomSuffix: false,
+      addRandomSuffix: false, // Sobrescreve o arquivo existente
       contentType: 'application/json'
     });
   } catch (error) {
-    console.error("Erro ao salvar DB:", error);
+    console.error("Erro ao salvar no Blob:", error);
     throw new Error("Falha na persistência do Blob");
   }
 }
 
-// --- Rotas da API ---
+// --- Rotas ---
 
 app.get('/', (req, res) => {
-  res.send('MineGen AI Backend is Running (Vercel Blob Mode)');
+  res.send('MineGen AI Backend (Vercel Blob Active)');
 });
 
-// Autenticação
+// AUTH
 app.post('/auth/register', async (req, res) => {
   try {
     const { username, email, password, savedApiKey } = req.body;
@@ -109,7 +109,7 @@ app.post('/auth/register', async (req, res) => {
     const { password: _, ...userWithoutPass } = newUser;
     res.json(userWithoutPass);
   } catch (e) {
-    res.status(500).json({ message: 'Erro interno ao registrar.' });
+    res.status(500).json({ message: 'Erro ao registrar.' });
   }
 });
 
@@ -121,7 +121,6 @@ app.post('/auth/login', async (req, res) => {
 
     if (!user) return res.status(401).json({ message: 'Credenciais inválidas.' });
 
-    // Atualiza LastSeen
     user.lastSeen = Date.now();
     await writeDB(db);
 
@@ -138,10 +137,11 @@ app.put('/users/:id', async (req, res) => {
     const updates = req.body;
     const db = await readDB();
     const idx = db.users.findIndex(u => u.id === id);
+    
     if (idx === -1) return res.status(404).json({ message: 'User not found' });
 
     db.users[idx] = { ...db.users[idx], ...updates };
-    if (!updates.password) db.users[idx].password = db.users[idx].password; // Mantém senha antiga se não enviada
+    if (!updates.password) db.users[idx].password = db.users[idx].password;
 
     await writeDB(db);
     const { password: _, ...clean } = db.users[idx];
@@ -160,7 +160,7 @@ app.delete('/users/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erro ao deletar.' }); }
 });
 
-// Projetos
+// PROJETOS
 app.get('/projects', async (req, res) => {
   try {
     const { ownerId } = req.query;
@@ -197,7 +197,7 @@ app.delete('/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erro ao deletar projeto.' }); }
 });
 
-// Convites
+// CONVITES
 app.post('/invites/send', async (req, res) => {
   try {
     const { projectId, projectName, senderId, senderName, targetEmail } = req.body;
@@ -206,8 +206,7 @@ app.post('/invites/send', async (req, res) => {
     const target = db.users.find(u => u.email === targetEmail);
     if (!target) return res.status(404).json({ message: 'Usuário não encontrado.' });
 
-    // Verifica online (5 min)
-    const isOnline = target.lastSeen && (Date.now() - target.lastSeen < 5 * 60 * 1000);
+    const isOnline = target.lastSeen && (Date.now() - target.lastSeen < 10 * 60 * 1000); // 10 min tolerance
     if (!isOnline) return res.status(409).json({ message: 'Usuário offline.' });
 
     db.invites.push({
@@ -254,12 +253,11 @@ app.post('/invites/:id/respond', async (req, res) => {
       }
     }
     
-    db.invites = db.invites.filter(i => i.id !== id); // Limpa processados
+    db.invites = db.invites.filter(i => i.id !== id);
     await writeDB(db);
     
     res.json(project || { success: true });
   } catch (e) { res.status(500).json({ message: 'Erro ao responder.' }); }
 });
 
-// Exporta o app para o Vercel Serverless
-module.exports = app;
+export default app;

@@ -1,13 +1,13 @@
 
 import { User, SavedProject } from "../types";
 
-// Lógica de URL Inteligente:
-// 1. Se houver variável de ambiente API_URL, usa ela (ex: http://localhost:3000 para dev local)
-// 2. Se não, assume que estamos no Vercel e o backend está na mesma origem, sob a rota /api
+// Se API_URL estiver vazia (Vercel Production), usa '/api' automaticamente.
 const getApiUrl = () => {
   const envUrl = (process.env as any).API_URL;
-  if (envUrl) return envUrl.replace(/\/$/, ""); // Remove barra final se houver
-  return "/api"; // Modo Relativo (Produção Vercel)
+  if (envUrl && envUrl.trim() !== "") {
+    return envUrl.replace(/\/$/, ""); 
+  }
+  return "/api"; // Caminho relativo padrão para Vercel Serverless
 };
 
 const API_BASE = getApiUrl();
@@ -22,9 +22,6 @@ export interface Invite {
   status: 'pending' | 'accepted' | 'rejected';
 }
 
-/**
- * DB Service: Agora usa Vercel Blob via API Serverless
- */
 export const dbService = {
   
   // --- AUTH ---
@@ -35,7 +32,10 @@ export const dbService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...userData, password })
     });
-    if (!response.ok) throw new Error((await response.json()).message || "Erro ao registrar");
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.message || "Erro ao registrar. Verifique sua conexão.");
+    }
     return await response.json();
   },
 
@@ -45,7 +45,10 @@ export const dbService = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    if (!response.ok) throw new Error((await response.json()).message || "Erro ao logar");
+    if (!response.ok) {
+       const err = await response.json().catch(() => ({}));
+       throw new Error(err.message || "Credenciais inválidas.");
+    }
     return await response.json();
   },
 
