@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database, Check, X, FolderInput, AlertTriangle } from 'lucide-react';
+import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database, Check, X, FolderInput, AlertTriangle, Zap } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -31,8 +31,9 @@ const App: React.FC = () => {
   const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
   const [incomingInvite, setIncomingInvite] = useState<Invite | null>(null);
   
-  // Refs para controle de concorrência e loops rápidos
-  const isSyncingRef = useRef(false);
+  // Controle de Concorrência
+  const isReadingRef = useRef(false); 
+  const isWritingRef = useRef(false);
   const lastSavedStateRef = useRef<string>('');
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
@@ -62,7 +63,7 @@ const App: React.FC = () => {
         if (savedUser) {
           const user = JSON.parse(savedUser);
           setCurrentUser(user);
-          // Sync inicial forçado
+          // Sync inicial
           await syncWithCloud(user.id);
           checkInviteLink(user);
         }
@@ -84,30 +85,31 @@ const App: React.FC = () => {
         if (p.ownerId === currentUser.id && p.ownerName !== currentUser.username) {
             changed = true;
             const updated = { ...p, ownerName: currentUser.username };
-            // Fire and forget save
-            dbService.saveProject(updated).catch(err => console.error("Auto-patch save failed", err));
+            dbService.saveProject(updated).catch(() => {});
             return updated;
         }
         return p;
     });
 
-    if (changed) {
-        setProjects(updatedProjects);
-    }
+    if (changed) setProjects(updatedProjects);
   }, [currentUser, projects.length, isLoaded]);
 
 
   const syncWithCloud = async (userId: string) => {
-    // Mutex para evitar sobreposição de requisições com intervalo curto
-    if (isSyncingRef.current) return;
-    isSyncingRef.current = true;
-    setIsCloudSyncing(true);
-
+    // TRAVA: Se estamos enviando dados (ex: limpando chat), NÃO leia da nuvem agora.
+    // Isso garante que a versão vazia local sobrescreva a versão cheia da nuvem.
+    if (isWritingRef.current) return;
+    
+    isReadingRef.current = true;
+    
     try {
         const cloudProjects = await dbService.loadUserProjects(userId);
         
         if (cloudProjects.length > 0) {
           setProjects(prevLocal => {
+            // Se o usuário começou a escrever durante o fetch, aborta para não sobrescrever a ação dele
+            if (isWritingRef.current) return prevLocal;
+
             const merged = [...prevLocal];
             const sanitizedCloud = cloudProjects.map(p => ({
                 ...p, 
@@ -125,35 +127,11 @@ const App: React.FC = () => {
               } else {
                 const localP = merged[localIdx];
                 
-                // Se a nuvem tem uma versão mais nova, ELA GANHA.
-                // Isso é crucial para que quando um Admin limpe o chat ou mude config,
-                // o Editor receba a atualização imediatamente.
+                // --- LÓGICA DE SINCRONIZAÇÃO ABSOLUTA ---
+                // Se o timestamp da nuvem for maior que o local, a nuvem é a verdade.
+                // Isso cobre: Limpar Chat, Nova Config, Novo Código.
                 if (cloudP.lastModified > localP.lastModified) {
-                    // Mesclagem Inteligente de Mensagens
-                    // Queremos pegar tudo da nuvem, mas preservar mensagens que o usuário ACABOU de enviar
-                    // e que talvez ainda não tenham subido (race condition de milissegundos).
-                    
-                    const cloudMsgIds = new Set(cloudP.messages.map(m => m.id));
-                    
-                    // Mensagens locais que são MAIS NOVAS que a última vez que a nuvem foi tocada.
-                    // Isso evita que mensagens antigas "renasçam" (Zumbis) após um Clear Chat.
-                    const recentLocalMessages = localP.messages.filter(m => {
-                        return !cloudMsgIds.has(m.id) && (m.timestamp || 0) > cloudP.lastModified;
-                    });
-
-                    // Se a config mudou na nuvem, aceitamos a da nuvem.
-                    const finalSettings = cloudP.lastModified > localP.lastModified ? cloudP.settings : localP.settings;
-                    
-                    // Se o projeto foi gerado na nuvem (resposta do agente), aceitamos.
-                    const finalGenerated = cloudP.lastModified > localP.lastModified ? cloudP.generatedProject : localP.generatedProject;
-
-                    merged[localIdx] = {
-                        ...cloudP,
-                        messages: [...cloudP.messages, ...recentLocalMessages], // Nuvem + Pendentes Recentes
-                        settings: finalSettings,
-                        generatedProject: finalGenerated,
-                        lastModified: Math.max(localP.lastModified, cloudP.lastModified)
-                    };
+                    merged[localIdx] = cloudP; // Substituição completa e direta
                     hasChanges = true;
                 }
               }
@@ -163,10 +141,9 @@ const App: React.FC = () => {
           });
         }
     } catch (e) {
-        // Silently fail on network glitches to keep UI smooth
+        // Silently fail on network glitches
     } finally {
-        setIsCloudSyncing(false);
-        isSyncingRef.current = false;
+        isReadingRef.current = false;
     }
   };
 
@@ -192,13 +169,12 @@ const App: React.FC = () => {
       }
   };
 
-  // LOOP DE SINCRONIZAÇÃO ULTRA-RÁPIDO (HEARTBEAT)
+  // LOOP DE LEITURA (HEARTBEAT DE ALTA FREQUÊNCIA)
+  // Verifica se outros administradores mudaram algo a cada 500ms
   useEffect(() => {
     if (!currentUser) return;
     
-    // Se tiver projeto ativo, sync a cada 800ms (High Performance Mode)
-    // Se não, a cada 5s (Idle Mode)
-    const syncIntervalTime = currentProjectId ? 800 : 5000; 
+    const syncIntervalTime = currentProjectId ? 500 : 3000; 
 
     const syncLoop = async () => {
         if (!document.hidden) { 
@@ -225,7 +201,8 @@ const App: React.FC = () => {
     };
   }, [currentUser, incomingInvite, currentProjectId]); 
 
-  // PUSH IMMEDIATO DE ALTERAÇÕES LOCAIS (SAVE)
+  // PUSH REATIVO IMEDIATO (ONE-BY-ONE)
+  // Dispara SEMPRE que 'activeProject' muda (ex: setMessages, setSettings)
   useEffect(() => {
     if (isLoaded) {
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
@@ -235,18 +212,34 @@ const App: React.FC = () => {
         localStorage.setItem('minegen_user', JSON.stringify(currentUser));
         
         if (activeProject) {
-            // Verifica se houve mudança real antes de enviar para rede para economizar banda
+            // Cria um hash do estado atual
             const currentStateStr = JSON.stringify({
                 msgs: activeProject.messages.length,
-                lastMod: activeProject.lastModified,
+                msgsTimestamp: activeProject.messages.length > 0 ? activeProject.messages[activeProject.messages.length-1].timestamp : 0,
+                lastMod: activeProject.lastModified, 
                 settings: activeProject.settings,
-                code: activeProject.generatedProject?.files.length
+                codeHash: activeProject.generatedProject?.files.length
             });
 
+            // Se o estado mudou em relação ao último salvo...
             if (currentStateStr !== lastSavedStateRef.current) {
                 lastSavedStateRef.current = currentStateStr;
-                // Envia imediatamente para a nuvem (Fire and Forget)
-                dbService.saveProject(activeProject).catch(e => console.warn("Background save warning:", e));
+                
+                // 1. Bloqueia leitura (Somos a autoridade agora)
+                isWritingRef.current = true;
+                setIsCloudSyncing(true);
+
+                // 2. Envia IMEDIATAMENTE (Sem debounce, um por um)
+                dbService.saveProject(activeProject)
+                    .then(() => {
+                        // Sucesso
+                    })
+                    .catch(e => console.warn("Erro ao salvar:", e))
+                    .finally(() => {
+                        // 3. Libera leitura imediatamente após o envio
+                        isWritingRef.current = false;
+                        setIsCloudSyncing(false);
+                    });
             }
         }
       } else {
@@ -276,6 +269,7 @@ const App: React.FC = () => {
   useEffect(() => {
       if (!activeProject || !directoryHandle || !hasFilePermission) return;
       
+      // Delay pequeno apenas para disco físico para não travar IO
       const timeoutId = setTimeout(async () => {
           if (activeProject.generatedProject) {
              try {
@@ -285,7 +279,7 @@ const App: React.FC = () => {
                  console.warn("Falha no Auto-Save para o disco:", e);
              }
           }
-      }, 2000); 
+      }, 1000); 
 
       return () => clearTimeout(timeoutId);
   }, [activeProject, directoryHandle, hasFilePermission]);
@@ -490,12 +484,12 @@ const App: React.FC = () => {
         )}
 
         {isCloudSyncing ? (
-          <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 pointer-events-none">
-            <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando...
+          <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 pointer-events-none animate-pulse">
+            <Zap className="w-3 h-3 text-mc-gold" /> Salvando...
           </div>
         ) : isBackendConnected ? (
           <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2 pointer-events-none">
-            <Database className="w-3 h-3" /> Cloud Ativa
+            <Database className="w-3 h-3" /> Online
           </div>
         ) : (
           <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2 pointer-events-none">
@@ -513,7 +507,7 @@ const App: React.FC = () => {
         setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
             ...p, 
             settings: typeof newS === 'function' ? newS(p.settings) : newS,
-            lastModified: Date.now() 
+            lastModified: Date.now() // Trigger imediato
         } : p))}
         currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
         onInviteMember={handleInvite}
@@ -529,7 +523,7 @@ const App: React.FC = () => {
               setMessages={upd => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
                   ...p, 
                   messages: typeof upd === 'function' ? upd(p.messages) : upd,
-                  lastModified: Date.now() 
+                  lastModified: Date.now() // Trigger imediato
               } : p))}
               currentProject={activeProject.generatedProject} 
               fullProject={activeProject} // PASSADO PARA PERMITIR SALVAMENTO DO HISTÓRICO NO DISCO
