@@ -1,17 +1,17 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User, SavedProject } from '../types';
-import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive, Timer } from 'lucide-react';
+import { Send, Bot, User as UserIcon, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Paperclip, X, Clock, Shield, Timer, HardDrive, StopCircle, ListPlus } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
-import { saveProjectToDisk, readProjectFromDisk, saveProjectStateToDisk } from '../services/fileSystem';
-import { playSound, stopSpeech } from '../services/audioService';
+import { saveProjectToDisk, saveProjectStateToDisk } from '../services/fileSystem';
+import { playSound } from '../services/audioService';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
   messages: ChatMessage[];
   setMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   currentProject: GeneratedProject | null;
-  fullProject: SavedProject | null; // Adicionado para acesso ao objeto completo para salvamento
+  fullProject: SavedProject | null; 
   onProjectGenerated: (project: any) => void;
   directoryHandle: any;
   onSetDirectoryHandle: (handle: any) => void;
@@ -27,7 +27,7 @@ const REASONING_STEPS = [
   "Gerando lógica Java...",            // 50 - 70%
   "Escrevendo classes & Config...",    // 70 - 85%
   "Validando sintaxe...",              // 85 - 95% (PAUSA AQUI)
-  "Finalizando e Salvando..."          // 98 - 100%
+  "Aplicando alterações..."            // 98 - 100%
 ];
 
 const TIMEOUT_DURATION = 300; // 5 minutos em segundos
@@ -39,7 +39,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [input, setInput] = useState('');
   const [isLocalProcessing, setIsLocalProcessing] = useState(false);
   
-  // Substitui reasoningStep simples por um valor percentual preciso
+  // Controle preciso da porcentagem (0 a 100)
   const [progressValue, setProgressValue] = useState(0);
   
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -57,72 +57,64 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, progressValue, processingMessage]);
 
-  // --- PROGRESSO VISUAL ORGÂNICO ---
+  // --- LÓGICA DE PROGRESSO SINCRONIZADA (Baseada em Timestamp) ---
   useEffect(() => {
     let interval: any;
     
     if (processingMessage) {
-        interval = setInterval(() => {
-            setProgressValue(prev => {
-                // Se já passou de 95 (definido manualmente quando a resposta chega), não mexe
-                if (prev >= 95) return prev;
-                
-                // Incremento variável para parecer "pensamento"
-                // Desacelera conforme chega perto de 95%
-                let increment = 0;
-                if (prev < 30) increment = 2; // Rápido no início
-                else if (prev < 60) increment = 1; // Médio
-                else if (prev < 80) increment = 0.5; // Mais lento
-                else if (prev < 95) increment = 0.2; // Muito lento esperando a API
+        // Se a mensagem tiver timestamp, usamos ele para calcular o tempo real decorrido
+        // Isso garante sincronia entre Admin e Editores
+        const startTime = processingMessage.timestamp || Date.now();
 
-                const next = prev + increment;
-                return next >= 95 ? 95 : next; // Trava em 95% até a API responder
+        interval = setInterval(() => {
+            const now = Date.now();
+            const elapsedSeconds = (now - startTime) / 1000;
+            const remaining = Math.max(0, TIMEOUT_DURATION - elapsedSeconds);
+            
+            setTimeLeft(Math.floor(remaining));
+
+            // Auto-cancelamento se estourar o tempo (apenas para quem está processando localmente)
+            if (remaining <= 0 && isLocalProcessing && abortControllerRef.current) {
+                 console.log("Timeout atingido. Reiniciando...");
+                 abortControllerRef.current.abort();
+            }
+
+            setProgressValue(prev => {
+                // Se já recebeu resposta da API (marcado logicamente como 98 ou mais), mantém
+                if (prev >= 98) return prev;
+
+                // Cálculo de porcentagem baseado no tempo estimado vs decorrido
+                // Estimativa: uma geração média leva cerca de 45 segundos para chegar a 95%
+                const estimatedDuration = 45; 
+                let calculatedPct = (elapsedSeconds / estimatedDuration) * 95;
+                
+                // Limita a 95% até receber resposta real
+                if (calculatedPct > 95) calculatedPct = 95;
+                
+                // Garante que a barra nunca retroceda visualmente
+                return Math.max(prev, calculatedPct);
             });
-        }, 300);
+
+        }, 200);
     } else {
-        // Se não está processando e não acabou de terminar (para não piscar 0 antes de sumir)
         if (!isLocalProcessing) {
             setProgressValue(0);
+            setTimeLeft(TIMEOUT_DURATION);
         }
     }
     return () => clearInterval(interval);
   }, [processingMessage, isLocalProcessing]); 
 
-  // Calcula qual texto mostrar baseado na porcentagem atual
+  // Texto descritivo baseado na porcentagem
   const getCurrentStepText = (pct: number) => {
       if (pct < 15) return REASONING_STEPS[0];
       if (pct < 30) return REASONING_STEPS[1];
       if (pct < 50) return REASONING_STEPS[2];
       if (pct < 70) return REASONING_STEPS[3];
       if (pct < 85) return REASONING_STEPS[4];
-      if (pct < 98) return REASONING_STEPS[5]; // Validando sintaxe... (Fica aqui nos 95%)
-      return REASONING_STEPS[6]; // Finalizando (98%+)
+      if (pct < 98) return REASONING_STEPS[5]; // "Validando sintaxe..." (Fica aqui nos 95%)
+      return REASONING_STEPS[6]; // "Aplicando alterações..." (98%+)
   };
-
-  // --- TIMER E TIMEOUT LOGIC ---
-  useEffect(() => {
-      let timer: any;
-      
-      if (isLocalProcessing) {
-          timer = setInterval(() => {
-              setTimeLeft(prev => {
-                  if (prev <= 1) {
-                      // TIMEOUT ATINGIDO - ABORTAR PARA REINICIAR
-                      if (abortControllerRef.current) {
-                          console.log("Tempo esgotado (5m). Cancelando para reiniciar...");
-                          abortControllerRef.current.abort(); // Dispara o erro 'AbortError' no fetch
-                      }
-                      return 0;
-                  }
-                  return prev - 1;
-              });
-          }, 1000);
-      } else {
-          setTimeLeft(TIMEOUT_DURATION);
-      }
-
-      return () => clearInterval(timer);
-  }, [isLocalProcessing]);
 
   useEffect(() => {
     if (pendingMessage) {
@@ -133,47 +125,50 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     const processQueue = async () => {
+      // Só processa a fila se NÃO estiver processando nada localmente
       if (isLocalProcessing || queue.length === 0) return;
       
+      // Verifica se já existe uma mensagem de 'processing' global (de outro usuário)
+      // Se sim, esperamos.
+      if (messages.some(m => m.status === 'processing')) return;
+
       const { id, text, att } = queue[0];
       setQueue(prev => prev.slice(1));
       
       setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'done' as const } : m));
       
-      // Passa o ID da mensagem para que possamos reutilizá-lo em caso de retry se quisermos (ou criar novos)
-      // Aqui vamos criar uma nova mensagem de resposta
       await executeAiGeneration(text, att);
     };
-    processQueue();
-  }, [queue, isLocalProcessing]);
+    
+    // Verifica periodicamente se pode processar a fila
+    const queueInterval = setInterval(processQueue, 1000);
+    return () => clearInterval(queueInterval);
+  }, [queue, isLocalProcessing, messages]);
 
   const executeAiGeneration = async (text: string, currentAttachments: Attachment[], isRetry = false, reuseMsgId?: string) => {
     if (!isRetry) {
         setIsLocalProcessing(true);
-        setProgressValue(0); // Reset visual
+        setProgressValue(0); 
     }
     
-    setTimeLeft(TIMEOUT_DURATION); // Reseta o timer visual e lógico
-    
-    // Cria novo controlador para esta tentativa
+    setTimeLeft(TIMEOUT_DURATION);
     abortControllerRef.current = new AbortController();
     
     const modelMsgId = reuseMsgId || generateUUID();
+    const startTime = Date.now();
 
     if (!isRetry) {
-        // 1. INSERE O PLACEHOLDER 'PROCESSING' NO ESTADO GLOBAL APENAS NA PRIMEIRA VEZ
         setMessages(prev => [
             ...prev, 
             { 
                 id: modelMsgId,
                 role: 'model', 
                 text: '', 
-                status: 'processing', // Gatilho visual
+                status: 'processing',
+                timestamp: startTime, // TIMESTAMP PARA SINCRONIZAÇÃO
                 senderName: 'Agente IA'
             }
         ]);
-    } else {
-        console.log(`[Auto-Retry] Reiniciando tentativa de geração...`);
     }
 
     try {
@@ -183,30 +178,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           currentProject, 
           currentAttachments, 
           currentUser,
-          abortControllerRef.current.signal // Passa o sinal
+          abortControllerRef.current.signal
       );
       
-      // --- CHEGOU A RESPOSTA (O fetch passou) ---
-      // Pula para 98% para indicar "Processando arquivos..."
+      // --- RESPOSTA RECEBIDA ---
       setProgressValue(98);
 
-      // Atualiza o projeto no estado global
       onProjectGenerated(project);
 
-      // Pequeno delay para usuário ver o "Finalizando..."
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 500));
 
-      // 3. SALVAMENTO NO DISCO
       if (directoryHandle) {
           await saveProjectToDisk(directoryHandle, project)
              .then(() => console.log("Projeto salvo no disco com sucesso."))
              .catch(e => console.warn("Erro ao salvar no disco (background):", e));
       }
 
-      // Finaliza 100%
+      // --- FINALIZAÇÃO ---
       setProgressValue(100);
 
-      // 2. ATUALIZA PARA 'DONE' COM O RESULTADO
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m, 
           text: project.explanation, 
@@ -218,17 +208,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       setIsLocalProcessing(false);
 
     } catch (error: any) {
-      // --- LÓGICA DE LOOP DE RETENTATIVA ---
       if (error.message === 'TIMEOUT' || error.name === 'AbortError') {
-          // Não define status como done, não para o processamento.
-          // Chama recursivamente a função.
+          // Se foi abortado manualmente, não tentamos novamente
+          if (error.name === 'AbortError') {
+             setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
+                 ...m,
+                 text: `**Geração Cancelada pelo Usuário.**`, 
+                 isError: true, 
+                 status: 'done' 
+             } : m));
+             setIsLocalProcessing(false);
+             return;
+          }
+
+          // Timeout automático tenta de novo
           setTimeout(() => {
               executeAiGeneration(text, currentAttachments, true, modelMsgId);
           }, 1000);
           return; 
       }
 
-      // Erro real (não timeout)
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m,
           text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
@@ -239,6 +238,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (settings.enableSounds) playSound('error');
       setIsLocalProcessing(false);
     }
+  };
+
+  const handleStopGeneration = () => {
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          setIsLocalProcessing(false);
+          playSound('click');
+      }
   };
 
   const handleAddToQueue = (text: string) => {
@@ -257,17 +264,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   const handleClearChat = async () => {
-    if (window.confirm("Tem certeza que deseja limpar todo o histórico de conversas deste projeto? Isso afetará o arquivo .minegen.")) {
-        // 1. Atualiza visualmente (React State)
+    if (window.confirm("Tem certeza que deseja limpar todo o histórico de conversas deste projeto? Isso afetará o arquivo .minegen para todos os membros.")) {
         setMessages([]);
         playSound('click');
 
-        // 2. Atualiza fisicamente (.minegen/state.json) se houver handle e projeto
         if (directoryHandle && fullProject) {
             try {
                 const updatedProject: SavedProject = {
                     ...fullProject,
-                    messages: [],
+                    messages: [], 
                     lastModified: Date.now()
                 };
                 await saveProjectStateToDisk(directoryHandle, updatedProject);
@@ -281,11 +286,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
-  // Arredonda para exibição (ex: 95.333 -> 95)
   const displayPercent = Math.min(100, Math.floor(progressValue));
   const currentStepText = getCurrentStepText(displayPercent);
 
-  // Helper para formatar tempo mm:ss
   const formatTime = (seconds: number) => {
       const m = Math.floor(seconds / 60);
       const s = seconds % 60;
@@ -318,13 +321,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {msg.role === 'user' && msg.senderId && <Shield className="w-2.5 h-2.5 text-mc-accent" />}
               </div>
               
-              {/* RENDERIZAÇÃO DA BARRA DE PROGRESSO SINCRONIZADA */}
               {msg.role === 'model' && msg.status === 'processing' ? (
                   <div className="flex gap-3 animate-fade-in w-full">
                      <div className="bg-[#252526] border border-[#333] rounded-lg p-3 w-64 shadow-lg">
                         <div className="flex items-center justify-between mb-2">
                            <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
-                             <Loader2 className="w-3 h-3 animate-spin" /> 
+                             <Loader2 className={`w-3 h-3 ${displayPercent < 100 ? 'animate-spin' : ''}`} /> 
                              {displayPercent >= 100 ? "Concluído" : `Gerando... ${displayPercent}%`}
                            </span>
                            <span className="text-[10px] text-gray-500">{currentStepText}</span>
@@ -335,11 +337,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                              style={{ width: `${displayPercent}%` }}
                            ></div>
                         </div>
-                        {/* TIMER DISPLAY - Oculta quando está em 100% para não confundir */}
+                        
                         <div className="flex items-center justify-end gap-1.5 text-[10px] text-gray-400 font-mono bg-black/20 py-1 px-2 rounded">
                             {displayPercent >= 100 ? (
                                 <span className="text-mc-green flex items-center gap-1">
                                    <CheckCircle2 className="w-3 h-3" /> Processamento Concluído
+                                </span>
+                            ) : displayPercent >= 95 ? (
+                                <span className="text-mc-gold flex items-center gap-1 animate-pulse">
+                                   <HardDrive className="w-3 h-3" /> Aguardando API...
                                 </span>
                             ) : (
                                 <>
@@ -375,7 +381,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             ))}
           </div>
         )}
-        <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2">
+        <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2 items-center">
+          
+          {/* INPUT AREA */}
           <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => {
             const files = Array.from(e.target.files || []) as File[];
             files.forEach(f => {
@@ -384,9 +392,56 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
               r.readAsText(f);
             });
           }} />
+          
+          {/* CLIP BUTTON */}
           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white transition-colors"><Paperclip className="w-5 h-5" /></button>
-          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Instrua o Agente ou Colaboradores..." className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent" />
-          <button type="submit" disabled={!input.trim()} className="bg-mc-accent hover:bg-blue-600 px-4 rounded-lg transition-colors flex items-center justify-center"><Send className="w-4 h-4 text-white" /></button>
+          
+          {/* SE ESTIVER PROCESSANDO: BOTÃO DE PARAR + INPUT NORMAL */}
+          {processingMessage && isLocalProcessing ? (
+             <>
+                <button 
+                  type="button" 
+                  onClick={handleStopGeneration}
+                  className="bg-red-600 hover:bg-red-500 text-white p-2 rounded-lg flex items-center justify-center animate-pulse"
+                  title="Parar Geração Atual"
+                >
+                    <StopCircle className="w-5 h-5" />
+                </button>
+                
+                <input 
+                  value={input} 
+                  onChange={e => setInput(e.target.value)} 
+                  placeholder="Adicionar à fila..." 
+                  className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent" 
+                />
+                
+                <button 
+                  type="submit" 
+                  disabled={!input.trim()} 
+                  className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 border border-gray-600 disabled:opacity-50"
+                  title="Adicionar à Fila"
+                >
+                  <ListPlus className="w-4 h-4" />
+                </button>
+             </>
+          ) : (
+             /* ESTADO NORMAL */
+             <>
+                <input 
+                  value={input} 
+                  onChange={e => setInput(e.target.value)} 
+                  placeholder="Instrua o Agente ou Colaboradores..." 
+                  className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent" 
+                />
+                <button 
+                  type="submit" 
+                  disabled={!input.trim() && attachments.length === 0} 
+                  className="bg-mc-accent hover:bg-blue-600 px-4 rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send className="w-4 h-4 text-white" />
+                </button>
+             </>
+          )}
         </form>
       </div>
     </div>

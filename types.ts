@@ -71,6 +71,7 @@ export interface ChatMessage {
   projectData?: GeneratedProject; 
   isError?: boolean;
   status?: 'queued' | 'processing' | 'done';
+  timestamp?: number; // Adicionado para sincronização de timer
 }
 
 export interface SavedProject {
