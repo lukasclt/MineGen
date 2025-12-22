@@ -3,13 +3,19 @@ import { Platform, JavaVersion, PluginSettings, BuildSystem } from './types';
 
 export const OPENROUTER_MODELS = [
   { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Exp', provider: 'Google' },
-  { id: 'google/gemini-2.0-pro-exp-02-05:free', name: 'Gemini 2.0 Pro Exp', provider: 'Google' },
-  { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1', provider: 'DeepSeek' },
+  { id: 'qwen/qwen3-coder:free', name: 'Qwen 3 Coder 480B', provider: 'Qwen' },
+  { id: 'deepseek/deepseek-r1-0528:free', name: 'DeepSeek R1 (0528)', provider: 'DeepSeek' },
+  { id: 'kwaipilot/kat-coder-pro:free', name: 'KAT Coder Pro V1', provider: 'Kwaipilot' },
+  { id: 'xiaomi/mimo-v2-flash:free', name: 'Xiaomi MiMo V2', provider: 'Xiaomi' },
   { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B', provider: 'Meta' },
-  { id: 'qwen/qwen-2.5-coder-32b-instruct:free', name: 'Qwen 2.5 Coder 32B', provider: 'Qwen' },
-  { id: 'mistralai/mistral-large-2411:free', name: 'Mistral Large 2', provider: 'Mistral' },
-  { id: 'nvidia/llama-3.1-nemotron-70b-instruct:free', name: 'Nemotron 70B', provider: 'NVIDIA' },
-  { id: 'microsoft/phi-4:free', name: 'Phi-4', provider: 'Microsoft' }
+  { id: 'mistralai/mistral-small-3.1-24b-instruct:free', name: 'Mistral Small 3.1 24B', provider: 'Mistral' },
+  { id: 'nousresearch/hermes-3-llama-3.1-405b:free', name: 'Hermes 3 405B', provider: 'Nous' },
+  { id: 'google/gemma-3-27b-it:free', name: 'Gemma 3 27B', provider: 'Google' },
+  { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron 3 Nano 30B', provider: 'NVIDIA' },
+  { id: 'allenai/olmo-3.1-32b-think:free', name: 'Olmo 3.1 32B Think', provider: 'AllenAI' },
+  { id: 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free', name: 'Dolphin Mistral 24B', provider: 'Venice' },
+  { id: 'tngtech/deepseek-r1t2-chimera:free', name: 'DeepSeek R1T2 Chimera', provider: 'TNG' },
+  { id: 'openai/gpt-oss-120b:free', name: 'GPT-OSS 120B', provider: 'OpenAI' }
 ];
 
 export const DEFAULT_SETTINGS: PluginSettings = {
