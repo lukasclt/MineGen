@@ -60,32 +60,54 @@ export const generatePluginCode = async (
 
   let userPromptContext = "";
 
+  // CONSTRUÇÃO DO PROMPT TIPO C (Context Injection)
+  const projectContext = `
+# PROJECT CONTEXT
+- **Project Name**: ${settings.name}
+- **Target Platform**: ${settings.platform}
+- **Minecraft Version**: ${settings.mcVersion}
+- **Java Version**: ${settings.javaVersion}
+- **Build System**: ${settings.buildSystem}
+- **Group ID**: ${settings.groupId}
+- **Artifact ID**: ${settings.artifactId}
+  `;
+
   if (previousProject && previousProject.files.length > 0) {
     const fileContext = previousProject.files
-      .filter(f => !f.path.includes('.minegen'))
+      .filter(f => !f.path.includes('.minegen') && !f.path.includes('gradlew'))
       .map(f => `FILE: ${f.path}\n\`\`\`${f.language}\n${f.content}\n\`\`\``)
       .join("\n\n");
       
     userPromptContext = `
-# PROJETO ATUAL
+${projectContext}
+
+# EXISTING CODEBASE
+The user is requesting changes to an existing project. Analyze the files below:
 ${fileContext}
 
-# SOLICITAÇÃO DE ALTERAÇÃO
+# USER REQUEST
 ${prompt}
 
-Retorne o JSON com os arquivos modificados ou novos.
+# INSTRUCTIONS
+- Modify the existing files or create new ones to satisfy the request.
+- Return the FULL content of any modified file.
+- Do not remove existing functionality unless asked.
     `;
   } else {
     userPromptContext = `
-# NOVO PROJETO MINECRAFT
-Nome: ${settings.name}
-Plataforma: ${settings.platform}
-Java: ${settings.javaVersion}
-Minecraft: ${settings.mcVersion}
-Build: ${settings.buildSystem}
+${projectContext}
 
-# REQUISITOS
+# NEW PROJECT REQUEST
+The user wants to create a brand new plugin from scratch.
+
+# USER REQUIREMENTS
 ${prompt}
+
+# INSTRUCTIONS
+- Scaffold a complete project structure.
+- Include 'plugin.yml' (or 'paper-plugin.yml'/'bungee.yml'/'velocity-plugin.json' based on platform).
+- Include the build file (${settings.buildSystem === BuildSystem.MAVEN ? 'pom.xml' : 'build.gradle'}).
+- Create the Main class and any necessary packages.
     `;
   }
 
@@ -102,7 +124,7 @@ ${prompt}
     } else {
       contentArray.push({
         type: "text",
-        text: `\n--- ANEXO: ${att.name} ---\n${att.content}\n`
+        text: `\n--- ATTACHMENT: ${att.name} ---\n${att.content}\n`
       });
     }
   });
@@ -124,10 +146,9 @@ ${prompt}
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: contentArray }
         ],
-        // Alguns modelos gratuitos ignoram response_format ou quebram com ele.
-        // Vamos tentar sem forçar, e confiar no parser robusto, a menos que seja um modelo da OpenAI/Google conhecido.
         response_format: settings.aiModel?.includes('gpt') || settings.aiModel?.includes('gemini') ? { type: "json_object" } : undefined,
-        temperature: 0.2, // Baixa temperatura para código mais preciso
+        temperature: 0.2, // Baixa temperatura para código preciso
+        max_tokens: 8192, // Permitir respostas longas para projetos complexos
       }),
     });
 
@@ -150,7 +171,6 @@ ${prompt}
     }
 
     const rawContent = data.choices[0].message.content;
-    console.log("[AI] Resposta bruta recebida (início):", rawContent.substring(0, 200) + "...");
     
     // Usa o parser robusto
     const project = extractJson(rawContent) as GeneratedProject;
@@ -160,11 +180,9 @@ ${prompt}
       throw new Error("O JSON retornado não contém uma lista de arquivos válida.");
     }
 
-    // Injetar wrappers se necessário
-    // Alterado para funcionar mesmo se previousProject existir, caso o usuário troque para Gradle no meio do projeto
+    // Injetar wrappers se necessário (apenas para Gradle)
     if (settings.buildSystem === BuildSystem.GRADLE) {
-        const hasWrapper = project.files.some(f => f.path.includes('gradlew')) || 
-                          (previousProject?.files.some(f => f.path.includes('gradlew')));
+        const hasWrapper = project.files.some(f => f.path.includes('gradlew'));
         
         if (!hasWrapper) {
             project.files.push(
