@@ -61,6 +61,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null); // Ref para textarea
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Verifica se sou o dono do projeto
+  const isOwner = currentUser && fullProject && currentUser.id === fullProject.ownerId;
+
   // --- FILTRAGEM DE MENSAGENS POR THREAD ---
   const threadMessages = useMemo(() => {
       return messages.filter(m => {
@@ -113,7 +116,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
      return list;
   }, [fullProject, messages, currentUser]);
 
-  const isMyThread = currentUser && activeThreadId === currentUser.id;
+  // Permissão de escrita: Posso escrever se for meu chat OU se eu for o dono
+  const canWrite = (currentUser && activeThreadId === currentUser.id) || isOwner;
 
   // Auto-resize do Textarea
   useEffect(() => {
@@ -180,7 +184,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     if (pendingMessage) {
-        if (currentUser && activeThreadId !== currentUser.id) {
+        // Se eu não puder escrever na thread atual (ex: sou membro vendo outro membro - teoricamente impossível com filtro), forço minha thread
+        if (currentUser && !canWrite) {
             setActiveThreadId(currentUser.id);
         }
         handleAddToQueue(pendingMessage);
@@ -224,7 +229,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             ...prev, 
             { 
                 id: modelMsgId,
-                threadId: activeThreadId, // VINCULA AO USUÁRIO ATUAL
+                threadId: activeThreadId, // A resposta da IA fica na thread ATIVA (mesmo se for o admin falando no chat do membro)
                 role: 'model', 
                 text: '', 
                 status: 'processing',
@@ -305,13 +310,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleAddToQueue = (text: string) => {
     if (!text.trim() && attachments.length === 0) return;
-    if (!isMyThread) return; 
+    if (!canWrite) return; 
 
     const msgId = generateUUID();
     
     const userMessage: ChatMessage = { 
         id: msgId, 
-        threadId: activeThreadId, 
+        threadId: activeThreadId, // Mensagem vai para a thread que estou visualizando
         role: 'user', 
         text, 
         attachments: [...attachments], 
@@ -397,7 +402,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* Botão Flutuante de Limpar Chat (Thread Atual) */}
-      {threadMessages.length > 0 && isMyThread && (
+      {threadMessages.length > 0 && canWrite && (
           <div className="absolute top-16 right-4 z-10">
             <button 
                 onClick={handleClearThread}
@@ -440,7 +445,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                     {displayPercent >= 100 ? "Concluído" : `Gerando... ${displayPercent}%`}
                                 </span>
                                 
-                                {displayPercent < 100 && isLocalProcessing && isMyThread && (
+                                {displayPercent < 100 && isLocalProcessing && canWrite && (
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); handleStopGeneration(); }}
                                         className="text-gray-500 hover:text-red-400 transition-colors p-1 bg-black/20 rounded hover:bg-red-900/30 ml-2"
@@ -493,7 +498,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       {/* INPUT AREA */}
       <div className="p-3 bg-[#1e1e1e] border-t border-[#333] shrink-0">
-        {isMyThread ? (
+        {canWrite ? (
              /* MODO EDITOR: POSSO ESCREVER */
             <>
                 {attachments.length > 0 && (
