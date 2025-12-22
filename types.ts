@@ -19,6 +19,14 @@ export enum BuildSystem {
   GRADLE = 'Gradle'
 }
 
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  avatarUrl?: string;
+  savedApiKey?: string; // Chave persistida na conta
+}
+
 export interface PluginSettings {
   name: string;
   groupId: string;
@@ -30,18 +38,10 @@ export interface PluginSettings {
   buildSystem: BuildSystem;
   description: string;
   author: string;
-  aiModel?: string;
-  aiUrl?: string; // Base URL for the AI Provider
-  apiKey?: string; // Custom API Key per project
-  // Audio Settings
+  aiModel: string; // Modelo selecionado
+  aiUrl: string;
   enableSounds: boolean;
   enableTTS: boolean;
-}
-
-export interface GitHubSettings {
-  token: string;
-  username: string;
-  repoName: string;
 }
 
 export interface GeneratedFile {
@@ -57,25 +57,35 @@ export interface GeneratedProject {
 
 export interface Attachment {
   type: 'image' | 'text';
-  content: string; // Base64 para imagem, string crua para texto
+  content: string;
   name: string;
 }
 
 export interface ChatMessage {
-  id?: string; // Unique ID for queue tracking
+  id?: string;
   role: 'user' | 'model';
+  senderId?: string;
+  senderName?: string;
   text: string;
   attachments?: Attachment[];
   projectData?: GeneratedProject; 
   isError?: boolean;
-  status?: 'queued' | 'processing' | 'done'; // Queue status
+  status?: 'queued' | 'processing' | 'done';
 }
 
 export interface SavedProject {
   id: string;
   name: string;
+  ownerId: string;
+  members: string[];
   lastModified: number;
   settings: PluginSettings;
   messages: ChatMessage[];
   generatedProject: GeneratedProject | null;
+}
+
+export interface GitHubSettings {
+  token: string;
+  username: string;
+  repoName: string;
 }

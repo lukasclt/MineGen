@@ -5,411 +5,174 @@ import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import Terminal from './components/Terminal';
-import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile } from './types';
+import AuthModal from './components/AuthModal';
+import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile, User } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk } from './services/fileSystem';
+import { playSound } from './services/audioService';
 
-const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-};
+const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
 const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => window.innerWidth > 768);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   
-  // Projects State
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-
-  // File System State (Persistent via IndexedDB)
   const [directoryHandle, setDirectoryHandle] = useState<any>(null);
-
-  // Terminal State
   const [isTerminalOpen, setIsTerminalOpen] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
-
-  // AI Trigger State (Bridge between CodeViewer and ChatInterface)
   const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
-
-  // Debounce Ref for Auto-Save
-  const saveTimeoutRef = useRef<number | null>(null);
-
-  // Computed Current Project
+  
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
 
-  const addLog = (message: string) => {
-    setTerminalLogs(prev => [...prev, message]);
-  };
+  const addLog = (m: string) => setTerminalLogs(prev => [...prev, m]);
 
   useEffect(() => {
     try {
+      const savedUser = localStorage.getItem('minegen_user');
+      if (savedUser) setCurrentUser(JSON.parse(savedUser));
+      
       const savedProjectsStr = localStorage.getItem('minegen_projects');
       const savedLastId = localStorage.getItem('minegen_last_project_id');
-
       if (savedProjectsStr) {
-        const parsedProjects: SavedProject[] = JSON.parse(savedProjectsStr);
-        setProjects(parsedProjects);
-        
-        if (savedLastId && parsedProjects.some(p => p.id === savedLastId)) {
-          setCurrentProjectId(savedLastId);
-        } else if (parsedProjects.length > 0) {
-          setCurrentProjectId(parsedProjects[0].id);
-        }
+        const parsed: SavedProject[] = JSON.parse(savedProjectsStr);
+        setProjects(parsed);
+        if (savedLastId && parsed.some(p => p.id === savedLastId)) setCurrentProjectId(savedLastId);
+        else if (parsed.length > 0) setCurrentProjectId(parsed[0].id);
       } 
-    } catch (e) {
-      console.error("Failed to load saved state", e);
-    } finally {
-      setIsLoaded(true);
-    }
+    } catch (e) { console.error(e); } finally { setIsLoaded(true); }
   }, []);
 
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('minegen_projects', JSON.stringify(projects));
+      if (currentUser) {
+        localStorage.setItem('minegen_user', JSON.stringify(currentUser));
+      } else {
+        localStorage.removeItem('minegen_user');
+      }
     }
-  }, [projects, isLoaded]);
+  }, [projects, currentUser, isLoaded]);
 
-  useEffect(() => {
-    if (isLoaded && currentProjectId) {
-      localStorage.setItem('minegen_last_project_id', currentProjectId);
-    }
-  }, [currentProjectId, isLoaded]);
-
-  // Load Directory Handle from IndexedDB when project changes
   useEffect(() => {
     const loadHandle = async () => {
-      setDirectoryHandle(null); // Reset first
+      setDirectoryHandle(null);
       if (currentProjectId) {
-        try {
-          const savedHandle = await getDirectoryHandleFromDB(currentProjectId);
-          if (savedHandle) {
-            setDirectoryHandle(savedHandle);
-            addLog(`Sistema: Manipulador de diretório carregado para projeto ${currentProjectId.substring(0,8)}`);
-          }
-        } catch (error) {
-          console.error("Error loading directory handle:", error);
-          addLog("Erro: Falha ao carregar manipulador de diretório do DB");
-        }
+        const saved = await getDirectoryHandleFromDB(currentProjectId);
+        if (saved) setDirectoryHandle(saved);
       }
     };
     loadHandle();
   }, [currentProjectId]);
 
-  // AUTO-SAVE to .minegen/state.json
-  useEffect(() => {
-    if (activeProject && directoryHandle) {
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-        
-        // Debounce save by 2 seconds to avoid excessive disk writes
-        saveTimeoutRef.current = window.setTimeout(async () => {
-            try {
-                await saveProjectStateToDisk(directoryHandle, activeProject);
-                // Optional: addLog("Estado salvo em .minegen/state.json"); 
-            } catch (e) {
-                console.warn("Auto-save falhou", e);
-            }
-        }, 2000);
-    }
-    return () => {
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    }
-  }, [activeProject, directoryHandle]);
-
-
-  const handleSetDirectoryHandle = async (handle: any) => {
-    setDirectoryHandle(handle);
-    addLog(`Sistema: Diretório "${handle.name}" vinculado com sucesso.`);
-    if (currentProjectId && handle) {
-      try {
-        await saveDirectoryHandleToDB(currentProjectId, handle);
-      } catch (error) {
-        console.error("Failed to save handle to DB:", error);
-      }
-    }
+  const handleInvite = (email: string) => {
+    if (!activeProject) return;
+    setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, members: [...p.members, email] } : p));
+    addLog(`Sistema: Convite enviado para ${email}.`);
+    playSound('success');
   };
 
   const handleOpenOrNewProject = async () => {
     try {
       const handle = await getDirectoryHandle();
       if (!handle) return; 
-
-      // 1. Tentar carregar estado existente (.minegen/state.json)
-      addLog(`Sistema: Verificando configurações salvas em "${handle.name}"...`);
-      const existingState = await loadProjectStateFromDisk(handle);
-
-      if (existingState) {
-          addLog("Sistema: Projeto existente encontrado! Restaurando estado...");
-          // Atualizar lista de projetos e selecionar
+      const existing = await loadProjectStateFromDisk(handle);
+      if (existing) {
           setProjects(prev => {
-              // Verifica se já existe na lista para não duplicar
-              const exists = prev.find(p => p.id === existingState.id);
-              if (exists) return prev.map(p => p.id === existingState.id ? existingState : p);
-              return [existingState, ...prev];
+              const exists = prev.find(p => p.id === existing.id);
+              if (exists) return prev.map(p => p.id === existing.id ? existing : p);
+              return [existing, ...prev];
           });
-          
-          setCurrentProjectId(existingState.id);
+          setCurrentProjectId(existing.id);
           setDirectoryHandle(handle);
-          await saveDirectoryHandleToDB(existingState.id, handle);
-          
-          // Re-ler arquivos do disco para garantir sincronia (caso tenham sido editados externamente)
-          const liveFiles = await readProjectFromDisk(handle);
-          handleProjectGenerated(liveFiles); // Atualiza os arquivos no estado
-
+          await saveDirectoryHandleToDB(existing.id, handle);
       } else {
-          // 2. Projeto Novo ou Importação sem histórico MineGen
-          addLog(`Sistema: Nenhum histórico encontrado. Analisando estrutura...`);
-          const loadedProject = await readProjectFromDisk(handle);
-          const hasFiles = loadedProject.files.length > 0;
-          addLog(`Sistema: ${loadedProject.files.length} arquivos encontrados.`);
-          
-          // AUTO DETECTION LOGIC
-          let detectedSettings: Partial<PluginSettings> = {};
-          let detectionLog = "";
-          if (hasFiles) {
-              detectedSettings = detectProjectSettings(loadedProject.files);
-              if (detectedSettings.platform) detectionLog += ` Plataforma: ${detectedSettings.platform}.`;
-              if (detectedSettings.buildSystem) detectionLog += ` Build: ${detectedSettings.buildSystem}.`;
-              if (detectedSettings.javaVersion) detectionLog += ` Java: ${detectedSettings.javaVersion}.`;
-              if (detectionLog) addLog(`Auto-Detecção:${detectionLog}`);
-          }
-
+          const loaded = await readProjectFromDisk(handle);
+          const detected = detectProjectSettings(loaded.files);
           const newId = generateUUID();
-          
-          const newProject: SavedProject = {
+          const newP: SavedProject = {
             id: newId,
-            name: detectedSettings.name || handle.name || "Novo Projeto",
+            name: detected.name || handle.name,
+            ownerId: currentUser?.id || 'guest',
+            members: [],
             lastModified: Date.now(),
-            settings: { 
-                ...DEFAULT_SETTINGS, 
-                name: detectedSettings.name || handle.name || DEFAULT_SETTINGS.name,
-                ...detectedSettings 
-            },
-            messages: [{
-              role: 'model',
-              text: hasFiles 
-                ? `📁 Pasta **${handle.name}** importada com sucesso!\n\n` +
-                  `🔍 **Análise Automática**:\n` +
-                  (detectedSettings.platform ? `- Plataforma: ${detectedSettings.platform}\n` : '') +
-                  (detectedSettings.buildSystem ? `- Build: ${detectedSettings.buildSystem}\n` : '') +
-                  (detectedSettings.javaVersion ? `- Java: ${detectedSettings.javaVersion}\n` : '') +
-                  `\nEncontrei ${loadedProject.files.length} arquivos. O histórico será salvo na pasta \`.minegen\`.`
-                : `📁 Pasta **${handle.name}** vinculada (Vazia).\nO que você gostaria de criar hoje?`
-            }],
-            generatedProject: hasFiles ? loadedProject : null
+            settings: { ...DEFAULT_SETTINGS, name: detected.name || handle.name, ...detected },
+            messages: [{ role: 'model', text: `Projeto vinculado: **${handle.name}**.` }],
+            generatedProject: loaded.files.length > 0 ? loaded : null
           };
-
-          setProjects(prev => [newProject, ...prev]);
-          setCurrentProjectId(newProject.id);
+          setProjects(prev => [newP, ...prev]);
+          setCurrentProjectId(newId);
           setDirectoryHandle(handle);
           await saveDirectoryHandleToDB(newId, handle);
-          // O useEffect de Auto-Save vai criar o .minegen logo em seguida
       }
-
-      if (window.innerWidth < 768) setSidebarOpen(false);
-
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        alert("Erro ao abrir projeto: " + error.message);
-        addLog(`Erro: ${error.message}`);
-      }
-    }
+    } catch (e: any) { addLog(`Erro: ${e.message}`); }
   };
 
-  const deleteProject = (id: string) => {
-    if (!window.confirm("Tem certeza que deseja remover este projeto da lista? (Arquivos no disco não serão deletados)")) return;
-    const newProjects = projects.filter(p => p.id !== id);
-    setProjects(newProjects);
-    if (currentProjectId === id) {
-      if (newProjects.length > 0) setCurrentProjectId(newProjects[0].id);
-      else setCurrentProjectId(null);
-    }
-    addLog("Sistema: Projeto removido da lista.");
-  };
-
-  const updateActiveProject = useCallback((updates: Partial<SavedProject>) => {
-    setProjects(prev => prev.map(p => {
-      if (p.id === currentProjectId) {
-        return { ...p, ...updates, lastModified: Date.now() };
-      }
-      return p;
-    }));
-  }, [currentProjectId]);
-
-  const handleSettingsChange = (newSettings: React.SetStateAction<PluginSettings>) => {
-    if (!activeProject) return;
-    const resolvedSettings = typeof newSettings === 'function' ? newSettings(activeProject.settings) : newSettings;
-    updateActiveProject({ settings: resolvedSettings });
-  };
-
-  const handleMessagesUpdate = (newMessagesOrUpdater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    setProjects(prevProjects => prevProjects.map(p => {
-      if (p.id === currentProjectId) {
-        const currentMessages = p.messages || [];
-        const updatedMessages = typeof newMessagesOrUpdater === 'function' 
-          ? newMessagesOrUpdater(currentMessages)
-          : newMessagesOrUpdater;
-        
-        // Simples log da última mensagem do usuário (se houver)
-        const lastMsg = updatedMessages[updatedMessages.length - 1];
-        if (lastMsg && lastMsg.role === 'model') {
-             addLog("AI: Resposta gerada.");
-        }
-
-        return { ...p, messages: updatedMessages, lastModified: Date.now() };
-      }
-      return p;
-    }));
-  };
-
-  // Lógica crítica: Mesclar arquivos novos com os existentes
   const handleProjectGenerated = (generated: GeneratedProject) => {
     if (!activeProject) return;
-
-    // addLog(`Sistema: Atualizando ${generated.files.length} arquivos no projeto...`); // Verbose
-
-    let mergedFiles: GeneratedFile[] = [];
-
-    if (activeProject.generatedProject?.files) {
-      mergedFiles = [...activeProject.generatedProject.files];
-      
-      // Update or add new files
-      generated.files.forEach(newFile => {
-        const existingIndex = mergedFiles.findIndex(f => f.path === newFile.path);
-        if (existingIndex !== -1) {
-          mergedFiles[existingIndex] = newFile;
-          // addLog(`Arquivo atualizado: ${newFile.path}`);
-        } else {
-          mergedFiles.push(newFile);
-          addLog(`Arquivo detectado: ${newFile.path}`);
-        }
-      });
-    } else {
-      mergedFiles = generated.files;
-    }
-
-    // Re-ordenar
-    mergedFiles.sort((a, b) => {
-      if (a.path === 'pom.xml' || a.path === 'build.gradle') return -1;
-      return a.path.localeCompare(b.path);
+    let merged = [...(activeProject.generatedProject?.files || [])];
+    generated.files.forEach(f => {
+      const idx = merged.findIndex(ex => ex.path === f.path);
+      if (idx !== -1) merged[idx] = f; else merged.push(f);
     });
-
-    updateActiveProject({ 
-      generatedProject: {
-        ...generated,
-        files: mergedFiles
-      } 
-    });
-    
-    // addLog("Sistema: Projeto atualizado com sucesso.");
+    setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, generatedProject: { ...generated, files: merged }, lastModified: Date.now() } : p));
   };
 
-  // Trigger from CodeViewer
-  const handleAddToContext = (fullMessage: string) => {
-     addLog("Usuário: Instrução enviada para processamento pelo Agente.");
-     setPendingAiMessage(fullMessage);
-  };
-
-  const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
-
-  if (!isLoaded) return <div className="bg-[#1e1e1e] h-[100dvh] w-full flex items-center justify-center text-gray-500 font-mono">Loading workspace...</div>;
+  if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace Cloud...</div>;
 
   return (
-    <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
-      {/* Mobile Backdrop */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-20 md:hidden transition-opacity" onClick={() => setSidebarOpen(false)} />
-      )}
-
-      {/* Sidebar Component */}
+    <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans">
       <Sidebar 
-        isOpen={sidebarOpen}
-        toggleSidebar={toggleSidebar}
-        projects={projects}
-        currentProjectId={currentProjectId}
-        onSelectProject={(id) => { setCurrentProjectId(id); addLog(`Sistema: Projeto trocado para ID ${id.substring(0,8)}`); }}
-        onCreateProject={handleOpenOrNewProject} // Both buttons trigger same FS logic
-        onDeleteProject={deleteProject}
+        isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+        projects={projects} currentProjectId={currentProjectId}
+        onSelectProject={setCurrentProjectId} onCreateProject={handleOpenOrNewProject}
+        onDeleteProject={id => setProjects(p => p.filter(x => x.id !== id))}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
-        setSettings={handleSettingsChange}
+        setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, settings: typeof newS === 'function' ? newS(p.settings) : newS } : p))}
+        currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
+        onInviteMember={handleInvite}
       />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:flex-row h-full relative z-10 overflow-hidden min-w-0">
-        
-        {/* Mobile Header */}
-        <div className="md:hidden h-12 border-b border-[#2b2b2b] flex items-center px-4 bg-[#252526] z-10 flex-shrink-0 justify-between">
-          <div className="flex items-center">
-            <button onClick={toggleSidebar} className="text-gray-300 mr-3 p-1 hover:bg-[#333] rounded">
-              <Menu className="w-5 h-5" />
-            </button>
-            <span className="font-semibold text-white truncate max-w-[200px] text-sm">
-              {activeProject?.name || "MineGen AI"}
-            </span>
-          </div>
-        </div>
-
-        {/* Left Panel: Chat Interface */}
-        <div className="flex-1 md:w-[35%] md:flex-none border-r border-[#2b2b2b] h-full overflow-hidden bg-[#1e1e1e] flex flex-col min-w-0 relative">
+      <div className="flex-1 flex flex-col md:flex-row h-full min-w-0">
+        <div className="flex-1 md:w-[35%] h-full flex flex-col min-w-0">
           {activeProject ? (
             <ChatInterface 
-              key={activeProject.id}
-              settings={activeProject.settings} 
-              messages={activeProject.messages}
-              setMessages={handleMessagesUpdate}
-              currentProject={activeProject.generatedProject}
-              onProjectGenerated={handleProjectGenerated}
-              onClearProject={() => updateActiveProject({ generatedProject: null, messages: [] })}
-              onUpdateProjectName={(name) => updateActiveProject({ name })}
-              directoryHandle={directoryHandle}
-              onSetDirectoryHandle={handleSetDirectoryHandle}
-              pendingMessage={pendingAiMessage}
-              onClearPendingMessage={() => setPendingAiMessage(null)}
+              key={activeProject.id} settings={activeProject.settings} messages={activeProject.messages}
+              setMessages={upd => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, messages: typeof upd === 'function' ? upd(p.messages) : upd } : p))}
+              currentProject={activeProject.generatedProject} onProjectGenerated={handleProjectGenerated}
+              directoryHandle={directoryHandle} onSetDirectoryHandle={setDirectoryHandle}
+              pendingMessage={pendingAiMessage} onClearPendingMessage={() => setPendingAiMessage(null)}
+              currentUser={currentUser}
             />
           ) : (
              <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">
-                <Menu className="w-12 h-12 opacity-20" />
-                <h2 className="text-lg font-medium text-[#cccccc]">Sem projeto aberto</h2>
-                <div className="flex gap-2">
-                    <button onClick={handleOpenOrNewProject} className="bg-[#007acc] text-white px-4 py-2 rounded shadow-sm hover:bg-[#0062a3] text-sm">Novo Projeto</button>
-                    <button onClick={handleOpenOrNewProject} className="bg-[#333] text-white px-4 py-2 rounded shadow-sm hover:bg-[#444] text-sm">Abrir Pasta</button>
-                </div>
+                <Menu className="w-12 h-12 opacity-10" />
+                <h2 className="text-lg font-medium text-[#cccccc]">Acesse um Projeto</h2>
+                <button onClick={handleOpenOrNewProject} className="bg-[#007acc] text-white px-6 py-2 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold">Importar do Disco</button>
              </div>
           )}
         </div>
 
-        {/* Right Panel: CodeViewer + Terminal */}
-        <div className="hidden md:flex flex-1 md:w-[65%] h-full overflow-hidden bg-[#1e1e1e] flex-col relative min-w-0">
-          <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
+        <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
+          <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
              <CodeViewer 
-              project={activeProject?.generatedProject || null} 
-              settings={activeProject?.settings || DEFAULT_SETTINGS}
-              directoryHandle={directoryHandle}
-              onAddToContext={handleAddToContext}
+              project={activeProject?.generatedProject || null} settings={activeProject?.settings || DEFAULT_SETTINGS}
+              directoryHandle={directoryHandle} onAddToContext={setPendingAiMessage}
             />
-            {/* Toggle Terminal Button (Floating bottom right of code area if closed) */}
-            {!isTerminalOpen && (
-               <button 
-                  onClick={() => setIsTerminalOpen(true)}
-                  className="absolute bottom-4 right-6 bg-[#007acc] text-white p-2 rounded-full shadow-lg hover:bg-[#0062a3] z-50 transition-transform hover:scale-105"
-                  title="Abrir Terminal"
-               >
-                 <TerminalSquare className="w-5 h-5" />
-               </button>
-            )}
           </div>
-          
-          <Terminal 
-            logs={terminalLogs} 
-            isOpen={isTerminalOpen} 
-            onClose={() => setIsTerminalOpen(false)} 
-            onClear={() => setTerminalLogs([])}
-            onAddLog={addLog}
-          />
+          <Terminal logs={terminalLogs} isOpen={isTerminalOpen} onClose={() => setIsTerminalOpen(false)} onClear={() => setTerminalLogs([])} onAddLog={addLog} />
         </div>
       </div>
+
+      <AuthModal 
+        isOpen={isAuthModalOpen} 
+        onClose={() => setIsAuthModalOpen(false)} 
+        onAuthSuccess={setCurrentUser} 
+        initialUser={currentUser}
+      />
     </div>
   );
 };

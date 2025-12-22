@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatMessage, PluginSettings, GeneratedProject, Attachment } from '../types';
-import { Send, Bot, User, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, VolumeX, Mic, MicOff, StopCircle, Clock, Hourglass } from 'lucide-react';
+import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from '../types';
+import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
-import { getDirectoryHandle, saveProjectToDisk, verifyPermission, readProjectFromDisk } from '../services/fileSystem';
+import { saveProjectToDisk, readProjectFromDisk } from '../services/fileSystem';
 import { playSound, speakText, stopSpeech } from '../services/audioService';
 
 interface ChatInterfaceProps {
@@ -12,97 +12,31 @@ interface ChatInterfaceProps {
   setMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   currentProject: GeneratedProject | null;
   onProjectGenerated: (project: any) => void;
-  onClearProject: () => void;
-  onUpdateProjectName: (name: string) => void;
   directoryHandle: any;
   onSetDirectoryHandle: (handle: any) => void;
   pendingMessage?: string | null;
   onClearPendingMessage?: () => void;
+  currentUser: User | null;
 }
 
-const REASONING_STEPS = [
-  "Lendo estrutura de arquivos atual...",
-  "Analisando contexto do projeto...",
-  "Planejando modificações no código...",
-  "Aplicando padrões de design...",
-  "Atualizando referências e imports...",
-  "Verificando consistência do Maven...",
-  "Finalizando escrita dos arquivos..."
-];
+const REASONING_STEPS = ["Lendo arquivos...", "Analisando contexto...", "Planejando...", "Escrevendo código...", "Finalizando..."];
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  settings, 
-  messages, 
-  setMessages, 
-  currentProject, 
-  onProjectGenerated, 
-  directoryHandle,
-  onSetDirectoryHandle,
-  pendingMessage,
-  onClearPendingMessage
+  settings, messages, setMessages, currentProject, onProjectGenerated, 
+  directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser
 }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [loadingText, setLoadingText] = useState('');
   const [reasoningStep, setReasoningStep] = useState(0);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isReading, setIsReading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  
-  // Fila de Mensagens com ID para rastreamento
   const [queue, setQueue] = useState<{id: string, text: string, att: Attachment[]}[]>([]);
   
-  const [needsPermission, setNeedsPermission] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const scrollToBottom = () => {
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading, progress, reasoningStep]);
-
-  useEffect(() => {
-    let interval: number;
-    if (isLoading) {
-      interval = window.setInterval(() => {
-        setReasoningStep(prev => (prev + 1) % REASONING_STEPS.length);
-      }, 2500);
-    } else {
-      setReasoningStep(0);
-    }
-    return () => clearInterval(interval);
-  }, [isLoading]);
-
-  // Initial Sync Logic
-  useEffect(() => {
-    const checkAndSync = async () => {
-      if (directoryHandle && !currentProject && !isReading) {
-          try {
-             const opts = { mode: 'readwrite' };
-             // @ts-ignore
-             const status = await directoryHandle.queryPermission(opts);
-             
-             if (status === 'granted') {
-                 setNeedsPermission(false);
-                 await syncProjectFiles(directoryHandle, false);
-             } else {
-                 setNeedsPermission(true);
-             }
-          } catch (e) {
-             console.warn("Could not query permissions", e);
-             setNeedsPermission(true);
-          }
-      }
-    };
-    checkAndSync();
-  }, [directoryHandle, currentProject]);
+  }, [messages, isLoading, reasoningStep]);
 
   useEffect(() => {
     if (pendingMessage) {
@@ -111,428 +45,117 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [pendingMessage]);
 
-  // PROCESSADOR DA FILA
   useEffect(() => {
-    const processNextInQueue = async () => {
-      // Se estiver carregando ou fila vazia, não faz nada
+    const processQueue = async () => {
       if (isLoading || queue.length === 0) return;
-
       const { id, text, att } = queue[0];
-      
-      // Remove da fila imediatamente para evitar processamento duplo
       setQueue(prev => prev.slice(1));
-      
-      // Atualiza status visual para 'processing'
-      setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'processing' } : m));
-      
+      setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'processing' as const } : m));
       await executeAiGeneration(text, att, id);
     };
-
-    processNextInQueue();
-  }, [queue, isLoading, currentProject]);
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
-    }
-  }, [input]);
-
-  // Monitor Speaking Status (Simple heuristic)
-  useEffect(() => {
-     if ('speechSynthesis' in window) {
-         const interval = setInterval(() => {
-             setIsSpeaking(window.speechSynthesis.speaking);
-         }, 500);
-         return () => clearInterval(interval);
-     }
-  }, []);
-
-  const handleAuthorize = async () => {
-      if (!directoryHandle) return;
-      const hasPerm = await verifyPermission(directoryHandle, true);
-      if (hasPerm) {
-          setNeedsPermission(false);
-          if (settings.enableSounds) playSound('success');
-          await syncProjectFiles(directoryHandle, true);
-      }
-  };
-
-  const syncProjectFiles = async (handle: any, notifyUser: boolean = true) => {
-    setIsReading(true);
-    try {
-      const loadedProject = await readProjectFromDisk(handle);
-      onProjectGenerated(loadedProject);
-      
-      if (notifyUser) {
-        setMessages(prev => [...prev, {
-          role: 'model',
-          text: `📁 **Sincronização Concluída**\nLi ${loadedProject.files.length} arquivos da pasta **${handle.name}**.`
-        }]);
-      }
-    } catch (error: any) {
-      console.error("Sync error", error);
-      if (settings.enableSounds) playSound('error');
-      if (notifyUser) {
-        setMessages(prev => [...prev, {
-           role: 'model',
-           text: `Erro ao ler arquivos: ${error.message}. (Talvez falte permissão?)`,
-           isError: true
-        }]);
-      }
-    } finally {
-      setIsReading(false);
-    }
-  };
+    processQueue();
+  }, [queue, isLoading]);
 
   const executeAiGeneration = async (text: string, currentAttachments: Attachment[], messageId?: string) => {
     setIsLoading(true);
-    setProgress(0);
-    setLoadingText('Processando agente...');
-    if (settings.enableSounds) playSound('click');
-
-    const progressInterval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 95) return 95;
-        return prev + Math.max(0.3, (95 - prev) / 20);
-      });
-    }, 400);
+    let stepInterval = setInterval(() => setReasoningStep(p => (p + 1) % REASONING_STEPS.length), 2000);
 
     try {
-      const project = await generatePluginCode(text, settings, currentProject, currentAttachments);
+      // Passando o currentUser para usar a chave de API da conta
+      const project = await generatePluginCode(text, settings, currentProject, currentAttachments, currentUser);
+      clearInterval(stepInterval);
       
-      clearInterval(progressInterval);
-      setProgress(98);
-      setLoadingText('Escrevendo alterações...');
-      setIsSaving(true);
-
-      await saveProjectToDisk(directoryHandle, project);
-      
-      setIsSaving(false);
-      setProgress(100);
-
-      await new Promise(resolve => setTimeout(resolve, 800));
-      
+      if (directoryHandle) {
+        await saveProjectToDisk(directoryHandle, project);
+      }
       onProjectGenerated(project);
 
-      const aiMessage: ChatMessage = {
-        role: 'model',
-        text: project.explanation,
-        projectData: project
-      };
-      
-      setMessages(prev => {
-        const updated = [...prev];
-        // Atualiza status da mensagem do usuário para 'done'
-        if (messageId) {
-            const idx = updated.findIndex(m => m.id === messageId);
-            if (idx !== -1) updated[idx] = { ...updated[idx], status: 'done' };
-        }
-        return [...updated, aiMessage];
+      setMessages((prev: ChatMessage[]): ChatMessage[] => {
+        const updated = prev.map(m => m.id === messageId ? { ...m, status: 'done' as const } : m);
+        const modelResponse: ChatMessage = { role: 'model', text: project.explanation, projectData: project, status: 'done' };
+        return [...updated, modelResponse];
       });
 
-      // Feedback Auditivo
       if (settings.enableSounds) playSound('success');
-      
-      // Auto-Read (TTS)
-      if (settings.enableTTS) {
-          speakText(project.explanation);
-      }
-      
+      if (settings.enableTTS) speakText(project.explanation);
     } catch (error: any) {
-      clearInterval(progressInterval);
-      setIsSaving(false);
-      
+      clearInterval(stepInterval);
+      setMessages(prev => [...prev, { role: 'model', text: error.message || "Erro fatal.", isError: true, status: 'done' }]);
       if (settings.enableSounds) playSound('error');
-
-      let errMsg = error.message || "Falha crítica.";
-      if (errMsg.includes("not allowed by the user agent")) {
-          errMsg = "Erro de Permissão: O navegador bloqueou o acesso aos arquivos. Por favor, clique no botão 'Autorizar Acesso' acima ou re-selecione a pasta.";
-          setNeedsPermission(true);
-      }
-
-      setMessages(prev => {
-         const updated = [...prev];
-         if (messageId) {
-             const idx = updated.findIndex(m => m.id === messageId);
-             if (idx !== -1) updated[idx] = { ...updated[idx], status: 'done' }; // Consider user message done even if error
-         }
-         return [...updated, {
-            role: 'model',
-            text: errMsg,
-            isError: true
-         }];
-      });
     } finally {
       setIsLoading(false);
-      setProgress(0);
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      if (file.type.startsWith('image/')) {
-        reader.readAsDataURL(file);
-        reader.onload = () => setAttachments(prev => [...prev, { type: 'image', name: file.name, content: reader.result as string }]);
-      } else {
-        reader.readAsText(file);
-        reader.onload = () => setAttachments(prev => [...prev, { type: 'text', name: file.name, content: reader.result as string }]);
-      }
-    });
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (settings.enableSounds) playSound('message');
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const handleAddToQueue = async (text: string) => {
+  const handleAddToQueue = (text: string) => {
     if (!text.trim() && attachments.length === 0) return;
-
-    let currentHandle = directoryHandle;
-
-    if (!currentHandle) {
-       const confirmSelect = window.confirm("Selecione a pasta do projeto para permitir que o Agente IA gerencie os arquivos.");
-       if (!confirmSelect) return;
-       const handle = await getDirectoryHandle();
-       if (!handle) return;
-       onSetDirectoryHandle(handle);
-       setNeedsPermission(false);
-       await syncProjectFiles(handle, true);
-       currentHandle = handle;
-    }
-
-    if (needsPermission) {
-        alert("Por favor, autorize o acesso à pasta clicando no botão 'Autorizar Acesso' antes de enviar comandos.");
-        if (settings.enableSounds) playSound('error');
-        return;
-    }
-
-    if (settings.enableSounds) playSound('message');
-
-    // Gera ID único para a mensagem
-    const msgId = Date.now().toString() + Math.random().toString(36).substring(2);
-
+    const msgId = Date.now().toString();
     const userMessage: ChatMessage = { 
-        id: msgId,
-        role: 'user', 
-        text: text, 
-        attachments: [...attachments],
-        status: 'queued' // Inicialmente na fila
+        id: msgId, role: 'user', text, attachments: [...attachments], status: 'queued',
+        senderId: currentUser?.id, senderName: currentUser?.username || 'Convidado'
     };
-    
     setMessages(prev => [...prev, userMessage]);
-    
-    // Adiciona à fila de execução
     setQueue(prev => [...prev, { id: msgId, text, att: [...attachments] }]);
-    
     setInput('');
     setAttachments([]);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    handleAddToQueue(input);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleAddToQueue(input);
-    }
-  };
-
-  // Helper to manual speak a message
-  const handleManualSpeak = (text: string) => {
-      if (isSpeaking) {
-          stopSpeech();
-          setIsSpeaking(false);
-      } else {
-          speakText(text);
-          setIsSpeaking(true);
-      }
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e] relative min-w-0">
-       
-       {/* Permission Banner (Fixed at top of chat) */}
-      {needsPermission && directoryHandle && (
-          <div className="bg-blue-900/40 border-b border-blue-500/30 p-3 flex items-center justify-between animate-fade-in shrink-0">
-              <div className="flex items-center gap-2 text-sm text-blue-200">
-                  <Lock className="w-4 h-4 text-blue-400" />
-                  <span>Acesso à pasta <strong>{directoryHandle.name}</strong> requer confirmação.</span>
-              </div>
-              <button 
-                  onClick={handleAuthorize}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-1.5 px-3 rounded shadow-sm transition-colors"
-              >
-                  Autorizar Acesso
-              </button>
-          </div>
-      )}
-
-      {/* Toolbar Header (Overlay) */}
-       <div className="absolute top-2 right-4 z-10 flex gap-2 pointer-events-none">
-         <div className="pointer-events-auto flex gap-2">
-            
-            {/* Audio Controls */}
-            {isSpeaking && (
-                <button 
-                onClick={stopSpeech} 
-                className="text-white bg-red-500/80 p-2 rounded-md hover:bg-red-600 animate-pulse transition-colors shadow-lg"
-                title="Parar Fala"
-                >
-                <StopCircle className="w-4 h-4" />
-                </button>
-            )}
-
-            {directoryHandle && (
-                <button 
-                onClick={() => handleAuthorize()} 
-                title="Sincronizar arquivos do disco"
-                className={`p-2 rounded-md hover:bg-[#333] transition-colors ${isReading ? 'text-blue-400 animate-spin' : 'text-gray-400'}`}
-                >
-                <RefreshCw className="w-4 h-4" />
-                </button>
-            )}
-            <button onClick={() => setMessages([])} className="text-gray-400 hover:text-red-400 p-2 rounded-md hover:bg-[#333] transition-colors"><Trash2 className="w-4 h-4" /></button>
-         </div>
-      </div>
-      
-      {/* Messages Area (Flex Grow) */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar min-w-0">
+    <div className="flex flex-col h-full bg-[#1e1e1e] relative">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
         {messages.map((msg, idx) => (
-            <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                <div className={`w-8 h-8 rounded flex items-center justify-center flex-shrink-0 mt-1 ${msg.role === 'model' ? 'bg-[#007acc]' : 'bg-[#333]'}`}>
-                    {msg.isError ? <AlertCircle className="w-5 h-5 text-red-200" /> : msg.role === 'model' ? <Bot className="w-5 h-5 text-white" /> : <User className="w-5 h-5 text-gray-300" />}
-                </div>
-                
-                <div className={`max-w-[85%] flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'} min-w-0 group`}>
-                    <div className={`px-4 py-2.5 rounded text-sm whitespace-pre-wrap leading-6 shadow-sm break-words max-w-full relative ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'}`}>
-                        {msg.text}
-                        {msg.projectData && (
-                            <div className="mt-2 pt-2 border-t border-[#444] text-xs text-green-400 flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" /> Alterações aplicadas
-                            </div>
-                        )}
-                        
-                        {/* Status da Fila (User only) */}
-                        {msg.role === 'user' && msg.status === 'queued' && (
-                            <div className="absolute -bottom-5 right-0 text-[10px] text-gray-400 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded-full">
-                                <Clock className="w-3 h-3" /> Na Fila...
-                            </div>
-                        )}
-                         {msg.role === 'user' && msg.status === 'processing' && (
-                            <div className="absolute -bottom-5 right-0 text-[10px] text-blue-400 flex items-center gap-1 bg-black/50 px-1.5 py-0.5 rounded-full">
-                                <Hourglass className="w-3 h-3 animate-spin" /> Processando...
-                            </div>
-                        )}
-
-                        {/* Message Actions (Visible on hover) */}
-                        {msg.role === 'model' && !msg.isError && (
-                            <button 
-                                onClick={() => handleManualSpeak(msg.text)}
-                                className="absolute -bottom-6 left-0 opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-white flex items-center gap-1 text-[10px]"
-                                title="Ler em voz alta"
-                            >
-                                <Volume2 className="w-3 h-3" /> Ler
-                            </button>
-                        )}
-                    </div>
-                    
-                    {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                            {msg.attachments.map((att, i) => (
-                                <div key={i} className="bg-[#252526] border border-[#333] rounded p-1.5 flex items-center gap-2 text-xs text-gray-400">
-                                    {att.type === 'image' ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
-                                    <span className="max-w-[100px] truncate">{att.name}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
+          <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 mt-1 shadow-md ${msg.role === 'model' ? 'bg-[#007acc]' : 'bg-gray-700 border border-gray-600'}`}>
+              {msg.role === 'model' ? <Bot className="w-5 h-5 text-white" /> : <UserIcon className="w-4 h-4 text-white" />}
             </div>
+            <div className={`max-w-[85%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className="flex items-center gap-1.5 px-1">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{msg.senderName || (msg.role === 'model' ? 'Agente IA' : 'Usuário')}</span>
+                {msg.role === 'user' && msg.senderId && <Shield className="w-2.5 h-2.5 text-mc-accent" />}
+              </div>
+              <div className={`px-4 py-2.5 rounded-lg text-sm shadow-sm relative ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'} ${msg.isError ? 'border-red-500/50 bg-red-900/10 text-red-200' : ''}`}>
+                {msg.text}
+                {msg.status === 'queued' && <div className="absolute -bottom-5 right-0 text-[10px] text-gray-500 bg-black/40 px-1.5 rounded-full"><Clock className="w-3 h-3 inline mr-1" /> Na Fila</div>}
+              </div>
+            </div>
+          </div>
         ))}
-
         {isLoading && (
-            <div className="flex gap-3 animate-pulse">
-                <div className="w-8 h-8 rounded bg-[#007acc] flex items-center justify-center mt-1"><Cpu className="w-5 h-5 text-white" /></div>
-                <div className="bg-[#252526] border border-[#333] rounded px-4 py-3 text-sm text-[#999] font-mono flex flex-col gap-2 min-w-[200px] max-w-full">
-                     <div className="flex items-center gap-2">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#007acc]" />
-                        <span>{loadingText} ({Math.round(progress)}%)</span>
-                     </div>
-                     <div className="text-xs text-[#666] italic pl-5 truncate">
-                         {REASONING_STEPS[reasoningStep]}
-                     </div>
-                </div>
+          <div className="flex gap-3 animate-pulse">
+            <div className="w-8 h-8 rounded bg-[#007acc] flex items-center justify-center mt-1"><Cpu className="w-5 h-5 text-white" /></div>
+            <div className="bg-[#252526] border border-[#333] rounded px-4 py-3 text-xs text-gray-400">
+              <Loader2 className="w-3.5 h-3.5 animate-spin inline mr-2" />
+              {REASONING_STEPS[reasoningStep]}
             </div>
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area (Static at Bottom) */}
-      <div className="shrink-0 p-3 bg-[#1e1e1e] border-t border-[#333] z-20">
-        
-        {/* Attachment Previews */}
+      <div className="p-3 bg-[#1e1e1e] border-t border-[#333]">
         {attachments.length > 0 && (
-            <div className="flex gap-2 mb-2 overflow-x-auto pb-1 custom-scrollbar">
-                {attachments.map((att, i) => (
-                    <div key={i} className="relative bg-[#2d2d2d] rounded p-2 flex items-center gap-2 shrink-0 border border-[#444]">
-                        {att.type === 'image' ? (
-                            <div className="w-8 h-8 bg-black rounded overflow-hidden">
-                                <img src={att.content} className="w-full h-full object-cover" />
-                            </div>
-                        ) : (
-                            <FileText className="w-8 h-8 text-gray-400 p-1" />
-                        )}
-                        <div className="flex flex-col">
-                             <span className="text-[10px] text-gray-300 max-w-[80px] truncate">{att.name}</span>
-                             <span className="text-[9px] text-gray-500 uppercase">{att.type}</span>
-                        </div>
-                        <button onClick={() => removeAttachment(i)} className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5 shadow-sm hover:bg-red-600"><X className="w-3 h-3" /></button>
-                    </div>
-                ))}
-            </div>
+          <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+            {attachments.map((att, i) => (
+              <div key={i} className="relative bg-[#2d2d2d] rounded p-2 flex items-center gap-2 border border-[#444] shrink-0">
+                <FileText className="w-5 h-5 text-mc-accent" />
+                <span className="text-[10px] text-gray-300 max-w-[80px] truncate">{att.name}</span>
+                <button onClick={() => setAttachments(p => p.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-red-500 rounded-full p-0.5"><X className="w-3 h-3 text-white" /></button>
+              </div>
+            ))}
+          </div>
         )}
-
-        <form onSubmit={handleSubmit} className="flex gap-2 items-end">
-           <input 
-             type="file" 
-             multiple 
-             ref={fileInputRef} 
-             className="hidden" 
-             onChange={handleFileUpload} 
-           />
-           <button 
-             type="button" 
-             onClick={() => fileInputRef.current?.click()}
-             className="text-gray-400 hover:text-white p-2 rounded hover:bg-[#333] transition-colors mb-[1px]"
-             title="Anexar arquivo ou imagem"
-           >
-             <Paperclip className="w-5 h-5" />
-           </button>
-
-          <textarea
-            ref={textareaRef} 
-            value={input} 
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            placeholder={queue.length > 0 || isLoading ? "Adicionar à fila..." : "Instrua o Agente..."}
-            className="flex-1 bg-[#252526] text-[#cccccc] rounded border border-[#333] px-3 py-2 text-sm focus:outline-none focus:border-[#007acc] resize-none custom-scrollbar"
-            style={{ minHeight: '38px', maxHeight: '150px' }} 
-          />
-          <button type="submit" disabled={!input.trim() && attachments.length === 0} className={`text-white rounded px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mb-[1px] flex items-center gap-1 ${queue.length > 0 || isLoading ? 'bg-orange-600 hover:bg-orange-700' : 'bg-[#007acc] hover:bg-[#0062a3]'}`}>
-             {queue.length > 0 || isLoading ? <Clock className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-          </button>
+        <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2">
+          <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => {
+            const files = Array.from(e.target.files || []);
+            files.forEach(f => {
+              const r = new FileReader();
+              r.onload = () => setAttachments(p => [...p, { type: 'text', name: f.name, content: r.result as string }]);
+              r.readAsText(f);
+            });
+          }} />
+          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white transition-colors"><Paperclip className="w-5 h-5" /></button>
+          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Instrua o Agente ou Colaboradores..." className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent" />
+          <button type="submit" disabled={!input.trim()} className="bg-mc-accent hover:bg-blue-600 px-4 rounded-lg transition-colors flex items-center justify-center"><Send className="w-4 h-4 text-white" /></button>
         </form>
       </div>
     </div>
