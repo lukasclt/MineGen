@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Mail, Lock, User as UserIcon, LogIn, UserPlus, ShieldCheck, Key, Eye, EyeOff } from 'lucide-react';
+import { X, Mail, Lock, User as UserIcon, LogIn, UserPlus, ShieldCheck, Key, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { User } from '../types';
+import { dbService } from '../services/dbService';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
   const [apiKey, setApiKey] = useState(initialUser?.savedApiKey || '');
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (initialUser) {
@@ -25,29 +27,55 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
       setEmail(initialUser.email);
       setUsername(initialUser.username);
       setApiKey(initialUser.savedApiKey || '');
+    } else {
+      setMode('login');
+      setPassword('');
+      setError('');
     }
   }, [initialUser, isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
 
-    if (mode !== 'profile' && (!email || !password)) {
-      setError('E-mail e senha são obrigatórios.');
-      return;
+    try {
+      if (mode === 'login') {
+        if (!email || !password) throw new Error('E-mail e senha são obrigatórios.');
+        
+        const user = await dbService.loginUser(email, password);
+        onAuthSuccess(user);
+        onClose();
+
+      } else if (mode === 'register') {
+        if (!email || !password || !username) throw new Error('Todos os campos são obrigatórios.');
+        
+        const newUser: Partial<User> = { username, email, savedApiKey: apiKey };
+        const user = await dbService.registerUser(newUser, password);
+        onAuthSuccess(user);
+        onClose();
+
+      } else if (mode === 'profile') {
+        if (!initialUser) return;
+        
+        const updatedUser: User = { 
+          ...initialUser, 
+          username, 
+          savedApiKey: apiKey 
+        };
+        // Aqui usamos updateUser em vez de register/login
+        const finalUser = await dbService.updateUser(updatedUser);
+        onAuthSuccess(finalUser);
+        onClose();
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Ocorreu um erro. Tente novamente.");
+    } finally {
+      setIsLoading(false);
     }
-
-    const userData: User = {
-      id: initialUser?.id || Math.random().toString(36).substr(2, 9),
-      username: mode === 'register' ? username : (initialUser?.username || email.split('@')[0]),
-      email: email,
-      savedApiKey: apiKey
-    };
-
-    onAuthSuccess(userData);
-    onClose();
   };
 
   return (
@@ -136,24 +164,39 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
                   {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              <p className="text-[9px] text-gray-500 mt-1 italic">Sua chave é salva apenas neste navegador.</p>
+              <p className="text-[9px] text-gray-500 mt-1 italic">Sua chave é salva apenas neste navegador (ou no banco se logado).</p>
             </div>
 
-            {error && <div className="text-red-400 text-xs py-1 flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> {error}</div>}
+            {error && (
+              <div className="text-red-400 text-xs py-2 px-3 bg-red-900/20 border border-red-500/30 rounded flex items-center gap-2">
+                <ShieldCheck className="w-3 h-3" /> {error}
+              </div>
+            )}
 
             <button
               type="submit"
-              className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 ${mode === 'login' ? 'bg-mc-accent hover:bg-blue-600' : mode === 'register' ? 'bg-mc-green hover:bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              disabled={isLoading}
+              className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${mode === 'login' ? 'bg-mc-accent hover:bg-blue-600' : mode === 'register' ? 'bg-mc-green hover:bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}
             >
-              {mode === 'login' ? 'Entrar' : mode === 'register' ? 'Registrar Agora' : 'Salvar Alterações'}
+              {isLoading ? (
+                <>
+                   <Loader2 className="w-4 h-4 animate-spin" /> Processando...
+                </>
+              ) : (
+                 mode === 'login' ? 'Entrar' : mode === 'register' ? 'Registrar Agora' : 'Salvar Alterações'
+              )}
             </button>
           </form>
 
           {mode !== 'profile' && (
             <div className="mt-6 text-center">
               <button
-                onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-                className="text-sm text-gray-400 hover:text-mc-accent transition-colors"
+                type="button"
+                onClick={() => {
+                   setMode(mode === 'login' ? 'register' : 'login');
+                   setError('');
+                }}
+                className="text-sm text-gray-400 hover:text-mc-accent transition-colors underline"
               >
                 {mode === 'login' ? 'Não tem uma conta? Registre-se' : 'Já possui conta? Faça login'}
               </button>
@@ -162,7 +205,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
         </div>
 
         <div className="bg-black/20 p-4 text-[10px] text-gray-500 flex items-center justify-center gap-2 border-t border-gray-700">
-          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza OpenRouter para processamento.
+          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza { (process.env as any).MONGODB_URI ? 'MongoDB' : 'LocalStorage' } para autenticação.
         </div>
       </div>
     </div>

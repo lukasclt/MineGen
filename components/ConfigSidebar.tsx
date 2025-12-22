@@ -2,7 +2,9 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem, User } from '../types';
 import { MC_VERSIONS, OPENROUTER_MODELS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket, Users, UserPlus, Shield, LogOut, ChevronRight, Settings2 } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket, Users, UserPlus, Shield, LogOut, ChevronRight, Settings2, UserX, Loader2, AlertCircle } from 'lucide-react';
+import { dbService } from '../services/dbService';
+import { playSound } from '../services/audioService';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -16,6 +18,7 @@ interface ConfigSidebarProps {
   currentUser: User | null;
   onOpenLogin: () => void;
   onLogout: () => void;
+  onDeleteAccount?: () => void;
 
   // Project Management
   projects: SavedProject[];
@@ -23,16 +26,19 @@ interface ConfigSidebarProps {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void; 
   onDeleteProject: (id: string) => void;
-  onInviteMember: (email: string) => void;
+  onInviteMember: (email: string) => void; // Mantido para compatibilidade, mas lógica movida pra cá
 }
 
 const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ 
   settings, setSettings, isOpen, toggleSidebar, showInstallButton, onInstall,
   projects, currentProjectId, onSelectProject, onCreateProject, onDeleteProject,
-  currentUser, onOpenLogin, onLogout, onInviteMember
+  currentUser, onOpenLogin, onLogout, onInviteMember, onDeleteAccount
 }) => {
   const [activeTab, setActiveTab] = useState<'chats' | 'config' | 'members'>('chats');
   const [inviteEmail, setInviteEmail] = useState('');
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleChange = (field: keyof PluginSettings, value: any) => {
     setSettings(prev => ({ ...prev, [field]: value }));
@@ -41,11 +47,34 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
   const isConfigDisabled = !currentProjectId;
   const activeProject = projects.find(p => p.id === currentProjectId);
 
-  const handleInvite = (e: React.FormEvent) => {
+  const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (inviteEmail) {
-        onInviteMember(inviteEmail);
-        setInviteEmail('');
+    if (!inviteEmail || !currentUser || !activeProject) return;
+
+    setIsInviting(true);
+    setInviteError(null);
+
+    try {
+      // Tenta enviar o convite pelo DB Service
+      await dbService.sendInvite(
+        activeProject.id,
+        activeProject.name,
+        currentUser.id,
+        currentUser.username,
+        inviteEmail
+      );
+
+      playSound('success');
+      // Atualiza lista localmente apenas para feedback visual imediato (opcional)
+      onInviteMember(inviteEmail); 
+      setInviteEmail('');
+      alert(`Convite enviado para ${inviteEmail}!`);
+
+    } catch (err: any) {
+      playSound('error');
+      setInviteError(err.message || "Erro ao enviar convite.");
+    } finally {
+      setIsInviting(false);
     }
   };
 
@@ -55,25 +84,43 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
       {/* User Header Section */}
       <div className="p-4 border-b border-gray-700 bg-black/10">
         {currentUser ? (
-          <div className="flex items-center gap-3">
-            <button onClick={onOpenLogin} className="relative group">
-              <div className="w-10 h-10 rounded-full bg-mc-accent flex items-center justify-center text-white font-bold text-lg shadow-inner group-hover:ring-2 ring-mc-accent transition-all">
-                {currentUser.username[0].toUpperCase()}
+          <div className="space-y-3">
+             <div className="flex items-center gap-3">
+              <button onClick={onOpenLogin} className="relative group shrink-0">
+                <div className="w-10 h-10 rounded-full bg-mc-accent flex items-center justify-center text-white font-bold text-lg shadow-inner group-hover:ring-2 ring-mc-accent transition-all">
+                  {currentUser.username[0].toUpperCase()}
+                </div>
+                <div className="absolute -bottom-1 -right-1 bg-mc-gold rounded-full p-0.5 border border-mc-panel">
+                  <Settings2 className="w-3 h-3 text-mc-dark" />
+                </div>
+              </button>
+              <div className="flex-1 min-w-0">
+                <h4 className="text-sm font-bold text-white truncate">{currentUser.username}</h4>
+                <p className="text-[10px] text-gray-500 truncate flex items-center gap-1">
+                  {currentUser.savedApiKey ? <Shield className="w-2.5 h-2.5 text-mc-green" /> : <Key className="w-2.5 h-2.5 text-gray-500" />}
+                  {currentUser.savedApiKey ? 'Chave Ativa' : 'Sem Chave de API'}
+                </p>
               </div>
-              <div className="absolute -bottom-1 -right-1 bg-mc-gold rounded-full p-0.5 border border-mc-panel">
-                <Settings2 className="w-3 h-3 text-mc-dark" />
-              </div>
-            </button>
-            <div className="flex-1 min-w-0">
-              <h4 className="text-sm font-bold text-white truncate">{currentUser.username}</h4>
-              <p className="text-[10px] text-gray-500 truncate flex items-center gap-1">
-                {currentUser.savedApiKey ? <Shield className="w-2.5 h-2.5 text-mc-green" /> : <Key className="w-2.5 h-2.5 text-gray-500" />}
-                {currentUser.savedApiKey ? 'Chave Ativa' : 'Sem Chave de API'}
-              </p>
+              <button onClick={onLogout} className="p-2 text-gray-500 hover:text-red-400 transition-colors" title="Sair">
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
-            <button onClick={onLogout} className="p-2 text-gray-500 hover:text-red-400 transition-colors" title="Sair">
-              <LogOut className="w-4 h-4" />
-            </button>
+            
+            {onDeleteAccount && (
+              <div className="text-[10px] flex justify-end">
+                {showDeleteConfirm ? (
+                  <div className="flex items-center gap-2 bg-red-900/30 p-1 rounded border border-red-500/30">
+                     <span className="text-red-300">Tem certeza?</span>
+                     <button onClick={() => { onDeleteAccount(); setShowDeleteConfirm(false); }} className="text-white bg-red-600 px-2 rounded hover:bg-red-500">Sim</button>
+                     <button onClick={() => setShowDeleteConfirm(false)} className="text-gray-300 hover:text-white">Cancelar</button>
+                  </div>
+                ) : (
+                   <button onClick={() => setShowDeleteConfirm(true)} className="text-gray-600 hover:text-red-500 flex items-center gap-1 transition-colors">
+                      <UserX className="w-3 h-3" /> Deletar Conta
+                   </button>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <button 
@@ -126,16 +173,25 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
           <div className="p-4 space-y-6">
             <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-700">
                <label className="text-xs font-bold text-white mb-3 block flex items-center gap-2"><UserPlus className="w-4 h-4 text-mc-green" /> Convidar Colaborador</label>
-               <form onSubmit={handleInvite} className="space-y-2">
+               <form onSubmit={handleInviteSubmit} className="space-y-2">
                   <input
                     type="email"
                     placeholder="e-mail do usuário..."
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
-                    disabled={isConfigDisabled}
+                    disabled={isConfigDisabled || isInviting}
                     className="w-full bg-gray-900 border border-gray-700 rounded p-2.5 text-xs text-white outline-none focus:border-mc-green disabled:opacity-50"
                   />
-                  <button type="submit" disabled={isConfigDisabled || !inviteEmail} className="w-full bg-mc-green hover:bg-green-600 disabled:opacity-50 text-mc-dark font-bold text-xs py-2 rounded transition-all">Enviar Convite</button>
+                  {inviteError && (
+                    <div className="flex items-center gap-2 text-[10px] text-red-400 bg-red-900/20 p-2 rounded border border-red-500/30">
+                       <AlertCircle className="w-3 h-3 shrink-0" />
+                       {inviteError}
+                    </div>
+                  )}
+                  <button type="submit" disabled={isConfigDisabled || !inviteEmail || isInviting} className="w-full bg-mc-green hover:bg-green-600 disabled:opacity-50 text-mc-dark font-bold text-xs py-2 rounded transition-all flex items-center justify-center gap-2">
+                    {isInviting ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    {isInviting ? "Verificando..." : "Enviar Convite"}
+                  </button>
                </form>
             </div>
 

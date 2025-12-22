@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from '../types';
 import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield } from 'lucide-react';
@@ -146,7 +145,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         )}
         <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2">
           <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => {
-            const files = Array.from(e.target.files || []);
+            const files = Array.from(e.target.files || []) as File[];
             files.forEach(f => {
               const r = new FileReader();
               r.onload = () => setAttachments(p => [...p, { type: 'text', name: f.name, content: r.result as string }]);

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database } from 'lucide-react';
+import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database, Check, X } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -9,8 +9,8 @@ import AuthModal from './components/AuthModal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile, User } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk } from './services/fileSystem';
-import { dbService } from './services/dbService';
-import { playSound } from './services/audioService';
+import { dbService, Invite } from './services/dbService';
+import { playSound, speakText } from './services/audioService';
 
 const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
@@ -27,6 +27,9 @@ const App: React.FC = () => {
   const [isTerminalOpen, setIsTerminalOpen] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
+  
+  // Estado para convites pendentes
+  const [incomingInvite, setIncomingInvite] = useState<Invite | null>(null);
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
 
@@ -68,6 +71,24 @@ const App: React.FC = () => {
     init();
   }, []);
 
+  // Polling de Convites
+  useEffect(() => {
+    if (!currentUser || !(process.env as any).MONGODB_URI) return;
+
+    const checkInvites = async () => {
+      const invites = await dbService.checkPendingInvites(currentUser.email);
+      if (invites.length > 0 && !incomingInvite) {
+        const invite = invites[0];
+        setIncomingInvite(invite);
+        playSound('message');
+        speakText(`Você tem um novo convite de ${invite.senderName} para o projeto ${invite.projectName}`);
+      }
+    };
+
+    const interval = setInterval(checkInvites, 5000); // Checa a cada 5s
+    return () => clearInterval(interval);
+  }, [currentUser, incomingInvite]);
+
   // Persistência em cada mudança (Cloud Sync)
   useEffect(() => {
     if (isLoaded) {
@@ -98,25 +119,69 @@ const App: React.FC = () => {
   }, [currentProjectId]);
 
   const handleAuthSuccess = async (user: User) => {
-    setIsCloudSyncing(true);
-    const syncedUser = await dbService.syncUser(user);
-    setCurrentUser(syncedUser);
+    setCurrentUser(user);
     
-    // Após login, carregar projetos dele
-    const cloudProjects = await dbService.loadUserProjects(syncedUser.id);
+    // Após login, carregar projetos dele da nuvem
+    setIsCloudSyncing(true);
+    const cloudProjects = await dbService.loadUserProjects(user.id);
     if (cloudProjects.length > 0) {
       setProjects(cloudProjects);
     }
     setIsCloudSyncing(false);
     setIsAuthModalOpen(false);
-    addLog(`Sistema: Bem-vindo de volta, ${syncedUser.username}!`);
+    addLog(`Sistema: Bem-vindo, ${user.username}!`);
+    playSound('success');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!currentUser) return;
+    
+    setIsCloudSyncing(true);
+    const success = await dbService.deleteUser(currentUser.id);
+    setIsCloudSyncing(false);
+
+    if (success) {
+      setCurrentUser(null);
+      setProjects([]);
+      setDirectoryHandle(null);
+      setCurrentProjectId(null);
+      localStorage.clear(); // Limpa tudo para garantir
+      
+      addLog("Sistema: Conta excluída. Todos os dados locais e remotos foram removidos.");
+      playSound('message');
+    } else {
+      addLog("Erro: Falha ao excluir conta. Tente novamente.");
+      playSound('error');
+    }
   };
 
   const handleInvite = (email: string) => {
     if (!activeProject) return;
     setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, members: [...p.members, email] } : p));
-    addLog(`Sistema: Convite enviado para ${email}.`);
-    playSound('success');
+    addLog(`Sistema: Convite adicionado localmente para ${email}.`);
+  };
+
+  const handleRespondInvite = async (accept: boolean) => {
+    if (!incomingInvite) return;
+    
+    setIsCloudSyncing(true);
+    try {
+      const project = await dbService.respondToInvite(incomingInvite.id, accept);
+      if (accept && project) {
+         setProjects(prev => [project, ...prev]);
+         setCurrentProjectId(project.id);
+         playSound('success');
+         addLog(`Sistema: Você entrou no projeto ${project.name}.`);
+      } else if (!accept) {
+         addLog("Sistema: Convite recusado.");
+      }
+    } catch (e) {
+      console.error(e);
+      addLog("Erro ao responder convite.");
+    } finally {
+      setIsCloudSyncing(false);
+      setIncomingInvite(null);
+    }
   };
 
   const handleOpenOrNewProject = async () => {
@@ -175,7 +240,7 @@ const App: React.FC = () => {
   if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace Cloud...</div>;
 
   return (
-    <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans">
+    <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2 pointer-events-none">
         {isCloudSyncing ? (
           <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 animate-pulse">
@@ -201,6 +266,7 @@ const App: React.FC = () => {
         setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, settings: typeof newS === 'function' ? newS(p.settings) : newS } : p))}
         currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
         onInviteMember={handleInvite}
+        onDeleteAccount={handleDeleteAccount}
       />
 
       <div className="flex-1 flex flex-col md:flex-row h-full min-w-0">
@@ -243,6 +309,31 @@ const App: React.FC = () => {
         onAuthSuccess={handleAuthSuccess} 
         initialUser={currentUser}
       />
+
+      {/* MODAL DE CONVITE */}
+      {incomingInvite && (
+         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in p-4">
+            <div className="bg-mc-panel border border-mc-accent w-full max-w-sm rounded-xl shadow-2xl overflow-hidden animate-slide-up">
+                <div className="p-6 text-center">
+                    <div className="w-12 h-12 rounded-full bg-mc-accent/20 text-mc-accent flex items-center justify-center mx-auto mb-4">
+                       <Cloud className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white mb-2">Novo Convite</h3>
+                    <p className="text-sm text-gray-400 mb-6">
+                       <strong>{incomingInvite.senderName}</strong> convidou você para colaborar no projeto <strong className="text-white">{incomingInvite.projectName}</strong>.
+                    </p>
+                    <div className="flex gap-3">
+                       <button onClick={() => handleRespondInvite(true)} className="flex-1 bg-mc-green hover:bg-green-600 text-black font-bold py-2 rounded-lg flex items-center justify-center gap-2 transition-all">
+                          <Check className="w-4 h-4" /> Aceitar
+                       </button>
+                       <button onClick={() => handleRespondInvite(false)} className="flex-1 bg-gray-700 hover:bg-red-500/50 hover:text-red-200 text-gray-300 font-bold py-2 rounded-lg flex items-center justify-center gap-2 transition-all">
+                          <X className="w-4 h-4" /> Recusar
+                       </button>
+                    </div>
+                </div>
+            </div>
+         </div>
+      )}
     </div>
   );
 };
