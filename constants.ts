@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   aiModel: 'google/gemini-2.0-flash-exp:free', 
   aiUrl: 'https://openrouter.ai/api/v1', 
   enableSounds: true,
-  enableTTS: true 
+  enableTTS: false 
 };
 
 export const MC_VERSIONS = [

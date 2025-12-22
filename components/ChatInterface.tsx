@@ -4,7 +4,7 @@ import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from 
 import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { saveProjectToDisk, readProjectFromDisk } from '../services/fileSystem';
-import { playSound, speakText, stopSpeech } from '../services/audioService';
+import { playSound, stopSpeech } from '../services/audioService';
 
 interface ChatInterfaceProps {
   settings: PluginSettings;
@@ -43,7 +43,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // CRÍTICO: Detecta se há alguma mensagem com status 'processing' no array de mensagens sincronizado.
-  // Isso garante que se o User 1 criar a mensagem, o User 2 (ao receber via polling) também ative a animação.
   const processingMessage = messages.find(m => m.status === 'processing' && m.role === 'model');
 
   useEffect(() => {
@@ -54,7 +53,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   useEffect(() => {
     let interval: any;
     if (processingMessage) {
-        // Se existe uma mensagem processando (minha ou de outro), inicia o ciclo visual
         interval = setInterval(() => {
             setReasoningStep(prev => {
                 if (prev < REASONING_STEPS.length - 1) return prev + 1;
@@ -62,11 +60,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             });
         }, 1200);
     } else {
-        // Se acabou, reseta
         setReasoningStep(0);
     }
     return () => clearInterval(interval);
-  }, [processingMessage]); // Depende apenas da existência da mensagem no estado global
+  }, [processingMessage]); 
 
   useEffect(() => {
     if (pendingMessage) {
@@ -82,7 +79,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       const { id, text, att } = queue[0];
       setQueue(prev => prev.slice(1));
       
-      // Atualiza status da mensagem do usuário para 'done' (foi enviada)
       setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'done' as const } : m));
       
       await executeAiGeneration(text, att);
@@ -97,15 +93,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     const modelMsgId = generateUUID();
 
     // 1. INSERE O PLACEHOLDER 'PROCESSING' NO ESTADO GLOBAL
-    // O App.tsx detecta essa mudança em 'messages' e salva no Redis.
-    // O User 2 faz polling, recebe essa mensagem com status 'processing' e o useEffect acima ativa a animação.
     setMessages(prev => [
         ...prev, 
         { 
             id: modelMsgId,
             role: 'model', 
             text: '', 
-            status: 'processing', // Gatilho visual para todos
+            status: 'processing', // Gatilho visual
             senderName: 'Agente IA'
         }
     ]);
@@ -113,33 +107,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     try {
       const project = await generatePluginCode(text, settings, currentProject, currentAttachments, currentUser);
       
-      let saveWarning = "";
-      
-      if (directoryHandle) {
-        try {
-            await saveProjectToDisk(directoryHandle, project);
-        } catch (saveError: any) {
-            console.warn("Falha no salvamento automático:", saveError);
-            saveWarning = "\n\n⚠️ **Aviso:** O código foi gerado mas não pôde ser salvo no disco automaticamente. Verifique se a pasta está conectada (ícone amarelo no topo).";
-        }
-      }
-
+      // Atualiza o projeto no estado global IMEDIATAMENTE
       onProjectGenerated(project);
 
       // 2. ATUALIZA PARA 'DONE' COM O RESULTADO
-      // App.tsx salva no Redis. User 2 recebe o código final.
+      // Fazemos isso antes de salvar no disco para garantir que a UI destrave (Loading Bar some)
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m, 
-          text: project.explanation + saveWarning, 
+          text: project.explanation, 
           projectData: project, 
           status: 'done' 
       } : m));
 
       if (settings.enableSounds) playSound('success');
-      if (settings.enableTTS) speakText(project.explanation);
+      
+      // REMOVIDO: speakText (TTS) conforme solicitado.
+      
+      // 3. SALVAMENTO NO DISCO (ASSÍNCRONO / NON-BLOCKING)
+      // Não usamos await aqui para não travar a UI no estado "Finalizando..." se o disco estiver lento
+      if (directoryHandle) {
+          saveProjectToDisk(directoryHandle, project)
+             .then(() => console.log("Projeto salvo no disco com sucesso."))
+             .catch(e => console.warn("Erro ao salvar no disco (background):", e));
+      }
 
     } catch (error: any) {
-      // Em caso de erro
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m,
           text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
