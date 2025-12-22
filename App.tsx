@@ -42,31 +42,68 @@ const App: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       try {
+        // 1. Carregar Usuário Local
         const savedUser = localStorage.getItem('minegen_user');
+        
+        // 2. Carregar Projetos do Cache Local (IMEDIATO)
+        const cachedProjects = localStorage.getItem('minegen_projects');
+        if (cachedProjects) {
+          try {
+            const parsedProjects = JSON.parse(cachedProjects);
+            setProjects(parsedProjects);
+            addLog("Sistema: Projetos carregados do cache local.");
+          } catch (e) {
+            console.error("Cache inválido", e);
+          }
+        }
+
+        // 3. Restaurar último projeto ativo
+        const savedLastId = localStorage.getItem('minegen_last_project_id');
+        if (savedLastId) setCurrentProjectId(savedLastId);
+
         if (savedUser) {
           const user = JSON.parse(savedUser);
           setCurrentUser(user);
           
           setIsCloudSyncing(true);
-          const cloudProjects = await dbService.loadUserProjects(user.id);
-          if (cloudProjects.length > 0) {
-            // Garante que members existe
-            const sanitized = cloudProjects.map(p => ({...p, members: p.members || []}));
-            setProjects(sanitized);
-            addLog("Sistema: Projetos sincronizados com Vercel Blob.");
+          try {
+            // 4. Sincronizar com Nuvem (Merge Inteligente)
+            const cloudProjects = await dbService.loadUserProjects(user.id);
+            
+            if (cloudProjects.length > 0) {
+              setProjects(prevLocal => {
+                const merged = [...prevLocal];
+                const sanitizedCloud = cloudProjects.map(p => ({...p, members: p.members || []}));
+
+                sanitizedCloud.forEach(cloudP => {
+                  const localIdx = merged.findIndex(p => p.id === cloudP.id);
+                  if (localIdx === -1) {
+                    // Novo projeto da nuvem
+                    merged.push(cloudP);
+                  } else {
+                    // Conflito: Mantém o mais recente
+                    if (cloudP.lastModified > merged[localIdx].lastModified) {
+                       merged[localIdx] = cloudP;
+                    }
+                  }
+                });
+                return merged;
+              });
+              addLog("Sistema: Sincronização com nuvem concluída.");
+            }
+          } catch (err) {
+            addLog("Aviso: Falha ao conectar na nuvem. Usando versão offline.");
+          } finally {
+            setIsCloudSyncing(false);
           }
-          setIsCloudSyncing(false);
           
           // Checar link de convite pendente na URL
           checkInviteLink(user);
 
         } else {
-          // Se não houver usuário, apenas inicializamos vazio, pois o bloqueio de login será renderizado
-          // Não carregamos projetos locais sem login agora
+          // Sem usuário, mantemos o estado carregado do cache local (se houver)
         }
 
-        const savedLastId = localStorage.getItem('minegen_last_project_id');
-        if (savedLastId) setCurrentProjectId(savedLastId);
       } catch (e) {
         console.error(e);
       } finally {
@@ -120,11 +157,14 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [currentUser, incomingInvite]);
 
-  // Persistência em cada mudança (Cloud Sync)
+  // Persistência em cada mudança (Local Cache + Cloud Sync)
   useEffect(() => {
     if (isLoaded) {
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
       
+      // Salva cache local SEMPRE que mudar (Safety Net)
+      localStorage.setItem('minegen_projects', JSON.stringify(projects));
+
       if (currentUser) {
         localStorage.setItem('minegen_user', JSON.stringify(currentUser));
         // Sync ativo de projetos modificados para a nuvem
@@ -151,12 +191,24 @@ const App: React.FC = () => {
   const handleAuthSuccess = async (user: User) => {
     setCurrentUser(user);
     
-    // Após login, carregar projetos dele da nuvem
+    // Após login, carregar projetos dele da nuvem e mesclar
     setIsCloudSyncing(true);
-    const cloudProjects = await dbService.loadUserProjects(user.id);
-    if (cloudProjects.length > 0) {
-      const sanitized = cloudProjects.map(p => ({...p, members: p.members || []}));
-      setProjects(sanitized);
+    try {
+        const cloudProjects = await dbService.loadUserProjects(user.id);
+        if (cloudProjects.length > 0) {
+          setProjects(prev => {
+             const merged = [...prev];
+             const sanitized = cloudProjects.map(p => ({...p, members: p.members || []}));
+             sanitized.forEach(cp => {
+                 const idx = merged.findIndex(p => p.id === cp.id);
+                 if (idx === -1) merged.push(cp);
+                 else if (cp.lastModified > merged[idx].lastModified) merged[idx] = cp;
+             });
+             return merged;
+          });
+        }
+    } catch(e) {
+        addLog("Erro ao sincronizar login: " + e);
     }
     setIsCloudSyncing(false);
     setIsAuthModalOpen(false);
@@ -274,7 +326,7 @@ const App: React.FC = () => {
     }
   };
 
-  if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace Cloud...</div>;
+  if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace...</div>;
 
   // LOGIN OBRIGATÓRIO: Se não houver currentUser, mostra AuthModal sem botão de fechar
   if (!currentUser) {
@@ -341,7 +393,7 @@ const App: React.FC = () => {
                    <TerminalSquare className="w-10 h-10 opacity-20" />
                 </div>
                 <h2 className="text-lg font-medium text-[#cccccc]">Bem-vindo ao MineGen Workspace</h2>
-                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no Vercel Blob.</p>
+                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no Cache Local e Vercel Blob.</p>
                 <button onClick={handleOpenOrNewProject} className="bg-mc-accent text-white px-8 py-2.5 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold transition-all">Importar / Novo Projeto</button>
              </div>
           )}
