@@ -21,68 +21,107 @@ app.use(express.json({ limit: '50mb' }));
 
 const memoryStore = new Map();
 let useRedis = false;
+let client = null;
 
-const client = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379'
-});
-
-client.on('error', (err) => {
-    // Log apenas se esperávamos que o Redis estivesse funcionando
-    if (useRedis) console.error('🔴 Redis Error:', err.message);
-});
-
+// Inicialização do Redis
 (async () => {
-  try {
-    console.log("🔄 Tentando conectar ao Redis...");
-    await client.connect();
-    useRedis = true;
-    console.log("✅ Conectado ao Redis com sucesso!");
-  } catch (e) {
-    console.warn("⚠️  Redis indisponível ou falhou. Ativando modo de ARMAZENAMENTO EM MEMÓRIA.");
-    console.warn("⚠️  Avisos: Dados serão perdidos ao reiniciar o servidor backend.");
-    useRedis = false;
+  const redisUrl = process.env.REDIS_URL;
+
+  if (redisUrl) {
+    try {
+      console.log("🔄 Tentando conectar ao Redis...");
+      
+      // Configuração para suportar TLS se a URL for rediss://
+      const socketOptions = redisUrl.startsWith('rediss://') 
+        ? { tls: true, rejectUnauthorized: false } 
+        : {};
+
+      client = createClient({
+        url: redisUrl,
+        socket: socketOptions
+      });
+
+      client.on('error', (err) => {
+        // Log discreto para erros de conexão recorrentes
+        if (useRedis) console.error('🔴 Redis Client Error:', err.message);
+      });
+
+      await client.connect();
+      useRedis = true;
+      console.log("✅ Conectado ao Redis com sucesso!");
+    } catch (e) {
+      console.warn("⚠️  Falha na conexão inicial com Redis:", e.message);
+      console.warn("⚠️  O sistema rodará em memória (dados voláteis). Verifique REDIS_URL.");
+      useRedis = false;
+    }
+  } else {
+    console.log("ℹ️  REDIS_URL não definida. Usando armazenamento em memória.");
   }
 })();
 
 // Abstração do Banco de Dados para suportar Redis ou Memória transparentemente
 const db = {
     async get(key) {
-        if (useRedis && client.isOpen) return await client.get(key);
+        if (useRedis && client?.isOpen) {
+            try { return await client.get(key); } 
+            catch (e) { return memoryStore.get(key) || null; }
+        }
         return memoryStore.get(key) || null;
     },
     async set(key, value) {
-        if (useRedis && client.isOpen) return await client.set(key, value);
+        if (useRedis && client?.isOpen) {
+            try { return await client.set(key, value); }
+            catch (e) { memoryStore.set(key, value); return 'OK'; }
+        }
         memoryStore.set(key, value);
         return 'OK';
     },
     async setEx(key, seconds, value) {
-        if (useRedis && client.isOpen) return await client.setEx(key, seconds, value);
+        if (useRedis && client?.isOpen) {
+            try { return await client.setEx(key, seconds, value); }
+            catch (e) { 
+                memoryStore.set(key, value);
+                setTimeout(() => memoryStore.delete(key), seconds * 1000);
+                return 'OK'; 
+            }
+        }
         memoryStore.set(key, value);
-        // Simulação simples de expiração
         setTimeout(() => memoryStore.delete(key), seconds * 1000);
         return 'OK';
     },
     async del(key) {
-        if (useRedis && client.isOpen) return await client.del(key);
+        if (useRedis && client?.isOpen) {
+            try { return await client.del(key); }
+            catch (e) { return memoryStore.delete(key) ? 1 : 0; }
+        }
         return memoryStore.delete(key) ? 1 : 0;
     },
     async keys(pattern) {
-        if (useRedis && client.isOpen) return await client.keys(pattern);
+        if (useRedis && client?.isOpen) {
+            try { return await client.keys(pattern); }
+            catch (e) { /* Fallback to regex below */ }
+        }
         
-        // Converte padrão Redis simples (minegen:project:*) para Regex
-        // Nota: Esta é uma aproximação para desenvolvimento local
-        const regexStr = '^' + pattern.replace(/:/g, ':').replace(/\*/g, '.*') + '$';
+        // Converte padrão Redis simples (minegen:project:*) para Regex de forma segura
+        const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+        const regexStr = '^' + escaped.replace(/\*/g, '.*') + '$';
         const regex = new RegExp(regexStr);
         
         return Array.from(memoryStore.keys()).filter(k => regex.test(k));
     },
     async mGet(keys) {
         if (keys.length === 0) return [];
-        if (useRedis && client.isOpen) return await client.mGet(keys);
+        if (useRedis && client?.isOpen) {
+            try { return await client.mGet(keys); }
+            catch (e) { return keys.map(k => memoryStore.get(k) || null); }
+        }
         return keys.map(k => memoryStore.get(k) || null);
     },
     async exists(key) {
-        if (useRedis && client.isOpen) return await client.exists(key);
+        if (useRedis && client?.isOpen) {
+             try { return await client.exists(key); }
+             catch (e) { return memoryStore.has(key) ? 1 : 0; }
+        }
         return memoryStore.has(key) ? 1 : 0;
     }
 };
@@ -190,10 +229,14 @@ router.get('/projects', async (req, res) => {
     if (!userJson) return res.json([]);
     const userEmail = JSON.parse(userJson).email;
 
+    // Busca chaves
     const keys = await db.keys('minegen:project:*');
     if (keys.length === 0) return res.json([]);
 
+    // Busca valores
     const projectsJson = await db.mGet(keys);
+    
+    // Filtra e parseia
     const projects = projectsJson
         .map(p => p ? JSON.parse(p) : null)
         .filter(p => p && (p.ownerId === ownerId || (p.members && p.members.includes(userEmail))));
@@ -210,7 +253,6 @@ router.put('/projects/:id', async (req, res) => {
     const { id } = req.params;
     const projectData = req.body;
     
-    // Atualizar lastModified
     projectData.lastModified = Date.now();
 
     await db.set(getKey('project', id), JSON.stringify(projectData));

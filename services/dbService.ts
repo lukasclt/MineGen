@@ -261,7 +261,26 @@ export const dbService = {
          const projectId = parts[1]; // local-link::ID::DATE
          
          const projects = LocalDB.getProjects();
-         const projectIdx = projects.findIndex(p => p.id === projectId);
+         let projectIdx = projects.findIndex(p => p.id === projectId);
+         
+         // AUTO-REPARO: Se não achou no "DB", procura no cache da UI ('minegen_projects')
+         if (projectIdx === -1) {
+             try {
+                 const uiCache = localStorage.getItem('minegen_projects');
+                 if (uiCache) {
+                     const uiProjects = JSON.parse(uiCache) as SavedProject[];
+                     const cachedProject = uiProjects.find(p => p.id === projectId);
+                     if (cachedProject) {
+                         LocalDB.saveProject(cachedProject);
+                         projects.push(cachedProject); // Atualiza lista local em memória
+                         projectIdx = projects.length - 1;
+                         console.log("[Offline Mode] Projeto recuperado do cache da UI.");
+                     }
+                 }
+             } catch(e) {
+                 console.warn("Falha no auto-reparo do cache UI", e);
+             }
+         }
          
          if (projectIdx === -1) throw new Error("Projeto não encontrado (Local). O projeto precisa existir neste navegador.");
          
