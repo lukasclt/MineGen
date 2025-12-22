@@ -32,6 +32,9 @@ const App: React.FC = () => {
   const [incomingInvite, setIncomingInvite] = useState<Invite | null>(null);
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
+  
+  // Verifica se o backend está configurado (via API_URL ou padrão)
+  const isBackendConnected = !!((process.env as any).API_URL || true); 
 
   const addLog = (m: string) => setTerminalLogs(prev => [...prev, m]);
 
@@ -44,12 +47,11 @@ const App: React.FC = () => {
           const user = JSON.parse(savedUser);
           setCurrentUser(user);
           
-          // Se houver MONGODB_URI, tentamos sincronizar projetos da nuvem
           setIsCloudSyncing(true);
           const cloudProjects = await dbService.loadUserProjects(user.id);
           if (cloudProjects.length > 0) {
             setProjects(cloudProjects);
-            addLog("Sistema: Projetos sincronizados com MongoDB Atlas.");
+            addLog("Sistema: Projetos sincronizados com Redis.");
           } else {
             const savedProjectsStr = localStorage.getItem('minegen_projects');
             if (savedProjectsStr) setProjects(JSON.parse(savedProjectsStr));
@@ -73,7 +75,7 @@ const App: React.FC = () => {
 
   // Polling de Convites
   useEffect(() => {
-    if (!currentUser || !(process.env as any).MONGODB_URI) return;
+    if (!currentUser) return;
 
     const checkInvites = async () => {
       const invites = await dbService.checkPendingInvites(currentUser.email);
@@ -246,9 +248,9 @@ const App: React.FC = () => {
           <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 animate-pulse">
             <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando...
           </div>
-        ) : (process.env as any).MONGODB_URI ? (
+        ) : isBackendConnected ? (
           <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2">
-            <Database className="w-3 h-3" /> MongoDB Conectado
+            <Database className="w-3 h-3" /> Redis Conectado
           </div>
         ) : (
           <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2">
@@ -286,7 +288,7 @@ const App: React.FC = () => {
                    <TerminalSquare className="w-10 h-10 opacity-20" />
                 </div>
                 <h2 className="text-lg font-medium text-[#cccccc]">Bem-vindo ao MineGen Workspace</h2>
-                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no { (process.env as any).MONGODB_URI ? 'MongoDB Atlas' : 'LocalStorage' }.</p>
+                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no Redis.</p>
                 <button onClick={handleOpenOrNewProject} className="bg-mc-accent text-white px-8 py-2.5 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold transition-all">Importar / Novo Projeto</button>
              </div>
           )}

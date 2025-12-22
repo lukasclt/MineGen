@@ -1,7 +1,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import { put, list } from '@vercel/blob';
+import { createClient } from 'redis';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -17,71 +17,64 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 
-const DB_FILENAME = 'minegen_database.json';
+const DB_KEY = 'minegen_database';
 const INITIAL_DB = { users: [], projects: [], invites: [] };
 
-// --- Vercel Blob Helpers ---
+// --- Redis Client Setup ---
+let redisClient = null;
 
-async function getDBUrl() {
-  try {
-    const { blobs } = await list();
-    // Encontra o arquivo exato
-    const dbBlob = blobs.find(b => b.pathname === DB_FILENAME);
-    return dbBlob ? dbBlob.url : null;
-  } catch (e) {
-    console.error("Erro ao listar blobs:", e);
-    return null;
+async function getRedisClient() {
+  if (!process.env.REDIS_URL) return null;
+  
+  if (!redisClient) {
+    redisClient = createClient({ url: process.env.REDIS_URL });
+    redisClient.on('error', (err) => console.error('Redis Client Error', err));
+    await redisClient.connect();
   }
+  return redisClient;
 }
 
+// --- Database Helpers ---
+
 async function readDB() {
-  // Fallback para memória se não houver token (Dev Local sem .env)
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  const client = await getRedisClient();
+
+  // Fallback para memória se não houver Redis Configurado
+  if (!client) {
     if (!(global).memoryDB) (global).memoryDB = JSON.parse(JSON.stringify(INITIAL_DB));
     return (global).memoryDB;
   }
 
   try {
-    const url = await getDBUrl();
-    if (!url) {
-      await writeDB(INITIAL_DB);
-      return INITIAL_DB;
-    }
-
-    // Cache busting com timestamp
-    const response = await fetch(`${url}?t=${Date.now()}`);
-    if (!response.ok) throw new Error('Falha ao baixar DB');
-    return await response.json();
+    const data = await client.get(DB_KEY);
+    return data ? JSON.parse(data) : INITIAL_DB;
   } catch (error) {
-    console.error("Erro ao ler DB:", error);
+    console.error("Erro ao ler Redis:", error);
     return INITIAL_DB;
   }
 }
 
 async function writeDB(data) {
+  const client = await getRedisClient();
+
   // Fallback para memória
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  if (!client) {
     (global).memoryDB = data;
     return;
   }
 
   try {
-    // Escreve usando Vercel Blob conforme documentação
-    await put(DB_FILENAME, JSON.stringify(data, null, 2), { 
-      access: 'public', 
-      addRandomSuffix: false, // Sobrescreve o arquivo existente
-      contentType: 'application/json'
-    });
+    await client.set(DB_KEY, JSON.stringify(data));
   } catch (error) {
-    console.error("Erro ao salvar no Blob:", error);
-    throw new Error("Falha na persistência do Blob");
+    console.error("Erro ao salvar no Redis:", error);
+    throw new Error("Falha na persistência do Redis");
   }
 }
 
 // --- Rotas ---
 
 app.get('/', (req, res) => {
-  res.send('MineGen AI Backend (Vercel Blob Active)');
+  res.send('MineGen AI Backend (Redis Active)');
 });
 
 // AUTH

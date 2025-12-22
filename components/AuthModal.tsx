@@ -205,7 +205,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
         </div>
 
         <div className="bg-black/20 p-4 text-[10px] text-gray-500 flex items-center justify-center gap-2 border-t border-gray-700">
-          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza { (process.env as any).MONGODB_URI ? 'MongoDB' : 'LocalStorage' } para autenticação.
+          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza Redis para autenticação.
         </div>
       </div>
     </div>
