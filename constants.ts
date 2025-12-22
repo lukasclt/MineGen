@@ -22,7 +22,7 @@ export const OPENROUTER_MODELS = [
   { id: 'alibaba/tongyi-deepresearch-30b-a3b:free', name: 'Tongyi DeepResearch 30B', provider: 'Alibaba' },
   { id: 'allenai/olmo-3-32b-think:free', name: 'Olmo 3 32B Think', provider: 'AllenAI' },
   { id: 'openai/gpt-oss-120b:free', name: 'GPT OSS 120B', provider: 'OpenAI' },
-  { id: 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free', name: 'Dolphin Mistral 24B (Uncensored)', provider: 'Venice' },
+  { id: 'cognitivecomputations/dolphin-mistral-24b-venice-edition:free', name: 'Dolphin Mistral 24B', provider: 'Venice' },
   { id: 'mistralai/mistral-7b-instruct:free', name: 'Mistral 7B Instruct', provider: 'Mistral' },
   { id: 'nousresearch/hermes-3-llama-3.1-405b:free', name: 'Hermes 3 405B', provider: 'Nous' },
   { id: 'nvidia/nemotron-nano-9b-v2:free', name: 'Nemotron Nano 9B V2', provider: 'NVIDIA' },
