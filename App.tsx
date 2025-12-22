@@ -116,9 +116,32 @@ const App: React.FC = () => {
             merged.push(cloudP);
           } else {
             const localP = merged[localIdx];
-            if (cloudP.lastModified > localP.lastModified) {
-               merged[localIdx] = cloudP;
-            }
+            
+            // --- SMART MERGE (SEGUNDO PLANO) ---
+            
+            // 1. Prioridade de Dados (Race Condition Fix)
+            // Se o local foi modificado RECENTEMENTE (ex: digitando código), ele "ganha" na estrutura de arquivos.
+            // Se a nuvem for mais nova (ex: outro dev salvou), a nuvem ganha.
+            // Mas para MENSAGENS, sempre fazemos append.
+            const isLocalNewer = localP.lastModified > cloudP.lastModified;
+
+            // 2. Mesclagem de Mensagens
+            // Começa com as mensagens da nuvem (fonte da verdade)
+            // Adiciona quaisquer mensagens locais que NÃO estejam na nuvem (mensagens enviadas recentemente)
+            const cloudMsgIds = new Set(cloudP.messages.map(m => m.id));
+            const pendingLocalMessages = localP.messages.filter(m => !cloudMsgIds.has(m.id));
+            
+            // Junta tudo
+            const finalMessages = [...cloudP.messages, ...pendingLocalMessages];
+
+            // 3. Atualiza o objeto do projeto preservando o estado local se for mais recente
+            merged[localIdx] = {
+                ...cloudP, // Baseia-se na nuvem para metadados (membros, id, etc)
+                messages: finalMessages, // Usa a lista mesclada segura
+                generatedProject: isLocalNewer ? localP.generatedProject : cloudP.generatedProject, // Protege código não salvo
+                settings: isLocalNewer ? localP.settings : cloudP.settings, // Protege configs não salvas
+                lastModified: Math.max(localP.lastModified, cloudP.lastModified) // Avança o relógio
+            };
           }
         });
         return merged;
@@ -211,7 +234,6 @@ const App: React.FC = () => {
   }, [currentProjectId]);
 
   // AUTO-SYNC STATE TO DISK
-  // Garante que qualquer atualização no projeto (seja por IA ou Cloud Sync) seja espelhada no disco
   useEffect(() => {
       if (!activeProject || !directoryHandle || !hasFilePermission) return;
       
@@ -219,13 +241,12 @@ const App: React.FC = () => {
           if (activeProject.generatedProject) {
              try {
                  await saveProjectToDisk(directoryHandle, activeProject.generatedProject);
-                 // Salva também o estado (metadados, chat, etc)
                  await saveProjectStateToDisk(directoryHandle, activeProject);
              } catch (e) {
                  console.warn("Falha no Auto-Save para o disco:", e);
              }
           }
-      }, 2000); // 2 segundos de debounce para evitar spam de escrita
+      }, 2000); 
 
       return () => clearTimeout(timeoutId);
   }, [activeProject, directoryHandle, hasFilePermission]);
