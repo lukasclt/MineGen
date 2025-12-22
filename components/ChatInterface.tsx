@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from '../types';
 import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive, Timer } from 'lucide-react';
@@ -218,6 +219,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setAttachments([]);
   };
 
+  const handleClearChat = () => {
+    if (window.confirm("Tem certeza que deseja limpar todo o histórico de conversas deste projeto?")) {
+        setMessages([]);
+        playSound('click');
+    }
+  };
+
   const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
   const progressPercent = Math.min(100, Math.round(((reasoningStep + 1) / REASONING_STEPS.length) * 100));
@@ -231,6 +239,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e] relative">
+      {/* Botão Flutuante de Limpar Chat */}
+      {messages.length > 0 && (
+          <button 
+             onClick={handleClearChat}
+             className="absolute top-2 right-4 z-10 p-1.5 bg-[#252526] hover:bg-red-900/40 text-gray-500 hover:text-red-400 rounded-md border border-[#333] hover:border-red-500/30 transition-all shadow-lg"
+             title="Limpar Histórico"
+          >
+             <Trash2 className="w-4 h-4" />
+          </button>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -251,7 +270,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         <div className="flex items-center justify-between mb-2">
                            <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
                              <Loader2 className="w-3 h-3 animate-spin" /> 
-                             Gerando... {progressPercent}%
+                             {progressPercent >= 100 ? "Finalizando..." : `Gerando... ${progressPercent}%`}
                            </span>
                            <span className="text-[10px] text-gray-500">{REASONING_STEPS[reasoningStep]}</span>
                         </div>
@@ -261,11 +280,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                              style={{ width: `${progressPercent}%` }}
                            ></div>
                         </div>
-                        {/* TIMER DISPLAY */}
+                        {/* TIMER DISPLAY - Oculta quando está em 100% para não confundir */}
                         <div className="flex items-center justify-end gap-1.5 text-[10px] text-gray-400 font-mono bg-black/20 py-1 px-2 rounded">
-                            <Timer className="w-3 h-3" />
-                            <span>Tempo Restante: <span className={timeLeft < 60 ? 'text-red-400' : 'text-white'}>{formatTime(timeLeft)}</span></span>
-                            {timeLeft === 0 && <span className="text-mc-gold ml-1 animate-pulse">(Reiniciando...)</span>}
+                            {progressPercent >= 100 ? (
+                                <span className="text-mc-green flex items-center gap-1">
+                                   <CheckCircle2 className="w-3 h-3" /> Processamento Concluído
+                                </span>
+                            ) : (
+                                <>
+                                    <Timer className="w-3 h-3" />
+                                    <span>Tempo Restante: <span className={timeLeft < 60 ? 'text-red-400' : 'text-white'}>{formatTime(timeLeft)}</span></span>
+                                    {timeLeft === 0 && <span className="text-mc-gold ml-1 animate-pulse">(Reiniciando...)</span>}
+                                </>
+                            )}
                         </div>
                      </div>
                   </div>
