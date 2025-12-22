@@ -65,7 +65,6 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
           username, 
           savedApiKey: apiKey 
         };
-        // Aqui usamos updateUser em vez de register/login
         const finalUser = await dbService.updateUser(updatedUser);
         onAuthSuccess(finalUser);
         onClose();
@@ -205,7 +204,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
         </div>
 
         <div className="bg-black/20 p-4 text-[10px] text-gray-500 flex items-center justify-center gap-2 border-t border-gray-700">
-          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza Redis para autenticação.
+          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza Vercel Blob para autenticação.
         </div>
       </div>
     </div>
