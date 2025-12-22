@@ -63,6 +63,7 @@ export interface Attachment {
 
 export interface ChatMessage {
   id?: string;
+  threadId?: string; // ID do dono desta conversa (Novo)
   role: 'user' | 'model';
   senderId?: string;
   senderName?: string;
