@@ -325,10 +325,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   <div className="flex gap-3 animate-fade-in w-full">
                      <div className="bg-[#252526] border border-[#333] rounded-lg p-3 w-64 shadow-lg">
                         <div className="flex items-center justify-between mb-2">
-                           <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
-                             <Loader2 className={`w-3 h-3 ${displayPercent < 100 ? 'animate-spin' : ''}`} /> 
-                             {displayPercent >= 100 ? "Concluído" : `Gerando... ${displayPercent}%`}
-                           </span>
+                           <div className="flex items-center gap-2">
+                               <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
+                                 <Loader2 className={`w-3 h-3 ${displayPercent < 100 ? 'animate-spin' : ''}`} /> 
+                                 {displayPercent >= 100 ? "Concluído" : `Gerando... ${displayPercent}%`}
+                               </span>
+                               
+                               {/* BOTÃO DE PARAR DENTRO DO CARD */}
+                               {displayPercent < 100 && isLocalProcessing && (
+                                   <button 
+                                       onClick={(e) => { e.stopPropagation(); handleStopGeneration(); }}
+                                       className="text-gray-500 hover:text-red-400 transition-colors p-1 bg-black/20 rounded hover:bg-red-900/30 ml-2"
+                                       title="Cancelar Geração"
+                                   >
+                                       <StopCircle className="w-3.5 h-3.5" />
+                                   </button>
+                               )}
+                           </div>
                            <span className="text-[10px] text-gray-500">{currentStepText}</span>
                         </div>
                         <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden mb-2">
@@ -343,14 +356,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                 <span className="text-mc-green flex items-center gap-1">
                                    <CheckCircle2 className="w-3 h-3" /> Processamento Concluído
                                 </span>
-                            ) : displayPercent >= 95 ? (
-                                <span className="text-mc-gold flex items-center gap-1 animate-pulse">
-                                   <HardDrive className="w-3 h-3" /> Aguardando API...
-                                </span>
                             ) : (
+                                /* ESTADO COM TIMER CONTINUO (MESMO EM 95%) */
                                 <>
+                                    {displayPercent >= 95 && (
+                                         <span className="text-mc-gold flex items-center gap-1 animate-pulse mr-2 border-r border-gray-600 pr-2">
+                                           <HardDrive className="w-3 h-3" /> Aguardando API...
+                                         </span>
+                                    )}
                                     <Timer className="w-3 h-3" />
-                                    <span>Tempo Restante: <span className={timeLeft < 60 ? 'text-red-400' : 'text-white'}>{formatTime(timeLeft)}</span></span>
+                                    <span>Tempo: <span className={timeLeft < 60 ? 'text-red-400' : 'text-white'}>{formatTime(timeLeft)}</span></span>
                                     {timeLeft === 0 && <span className="text-mc-gold ml-1 animate-pulse">(Reiniciando...)</span>}
                                 </>
                             )}
@@ -396,18 +411,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           {/* CLIP BUTTON */}
           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white transition-colors"><Paperclip className="w-5 h-5" /></button>
           
-          {/* SE ESTIVER PROCESSANDO: BOTÃO DE PARAR + INPUT NORMAL */}
+          {/* SE ESTIVER PROCESSANDO: INPUT PARA FILA */}
           {processingMessage && isLocalProcessing ? (
              <>
-                <button 
-                  type="button" 
-                  onClick={handleStopGeneration}
-                  className="bg-red-600 hover:bg-red-500 text-white p-2 rounded-lg flex items-center justify-center animate-pulse"
-                  title="Parar Geração Atual"
-                >
-                    <StopCircle className="w-5 h-5" />
-                </button>
-                
                 <input 
                   value={input} 
                   onChange={e => setInput(e.target.value)} 
