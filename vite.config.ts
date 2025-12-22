@@ -8,6 +8,19 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     base: '/',
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/socket.io': {
+          target: 'http://localhost:3001',
+          ws: true
+        }
+      }
+    },
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || ""),
       // Se não houver variável definida, deixamos vazio para o dbService ativar o modo LocalStorage automaticamente

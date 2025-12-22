@@ -77,6 +77,31 @@ const App: React.FC = () => {
     init();
   }, []);
 
+  // CORREÇÃO AUTOMÁTICA DE NOME DO DONO
+  // Se o usuário logado é dono de um projeto mas o ownerName está errado/vazio, corrige e salva.
+  useEffect(() => {
+    if (!currentUser || projects.length === 0 || !isLoaded) return;
+    
+    let changed = false;
+    const updatedProjects = projects.map(p => {
+        // Se eu sou o dono, E (o nome está diferente OU faltando)
+        if (p.ownerId === currentUser.id && p.ownerName !== currentUser.username) {
+            changed = true;
+            const updated = { ...p, ownerName: currentUser.username };
+            // Salva individualmente no banco para garantir consistência
+            dbService.saveProject(updated).catch(err => console.error("Auto-patch save failed", err));
+            return updated;
+        }
+        return p;
+    });
+
+    if (changed) {
+        setProjects(updatedProjects);
+        console.log("Sistema: Projetos atualizados com nome do dono correto.");
+    }
+  }, [currentUser, projects.length, isLoaded]);
+
+
   const syncWithCloud = async (userId: string) => {
     const cloudProjects = await dbService.loadUserProjects(userId);
     if (cloudProjects.length > 0) {
@@ -95,7 +120,7 @@ const App: React.FC = () => {
           } else {
             const localP = merged[localIdx];
             
-            // Lógica de Merge Aprimorada:
+            // Lógica de Merge:
             // Sincroniza se o cloud for mais novo, se tiver mais mensagens OU se a lista de membros for diferente
             const cloudMessagesHash = JSON.stringify(cloudP.messages.map(m => m.status + m.id));
             const localMessagesHash = JSON.stringify(localP.messages.map(m => m.status + m.id));
@@ -290,6 +315,11 @@ const App: React.FC = () => {
           setDirectoryHandle(handle);
           setHasFilePermission(true);
           await saveDirectoryHandleToDB(safeExisting.id, handle);
+          
+          // Salvar imediatamente na nuvem se logado
+          if (currentUser) {
+              await dbService.saveProject(safeExisting);
+          }
       } else {
           const loaded = await readProjectFromDisk(handle);
           const detected = detectProjectSettings(loaded.files);
@@ -312,6 +342,12 @@ const App: React.FC = () => {
           setDirectoryHandle(handle);
           setHasFilePermission(true);
           await saveDirectoryHandleToDB(newId, handle);
+
+          // CRÍTICO: Salvar imediatamente na nuvem para permitir links de convite
+          if (currentUser) {
+              await dbService.saveProject(newP);
+              addLog("Sistema: Projeto salvo na nuvem.");
+          }
       }
     } catch (e: any) { addLog(`Erro: ${e.message}`); }
   };

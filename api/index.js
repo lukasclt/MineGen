@@ -17,21 +17,75 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' }));
 
-// --- Redis Client ---
+// --- Camada de Dados (Redis com Fallback em Memória) ---
+
+const memoryStore = new Map();
+let useRedis = false;
+
 const client = createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
 
-client.on('error', (err) => console.error('Redis Client Error', err));
+client.on('error', (err) => {
+    // Log apenas se esperávamos que o Redis estivesse funcionando
+    if (useRedis) console.error('🔴 Redis Error:', err.message);
+});
 
 (async () => {
-  if (process.env.REDIS_URL) {
+  try {
+    console.log("🔄 Tentando conectar ao Redis...");
     await client.connect();
-    console.log("✅ Conectado ao Redis");
-  } else {
-    console.warn("⚠️ REDIS_URL não definida. O backend não funcionará corretamente sem Redis.");
+    useRedis = true;
+    console.log("✅ Conectado ao Redis com sucesso!");
+  } catch (e) {
+    console.warn("⚠️  Redis indisponível ou falhou. Ativando modo de ARMAZENAMENTO EM MEMÓRIA.");
+    console.warn("⚠️  Avisos: Dados serão perdidos ao reiniciar o servidor backend.");
+    useRedis = false;
   }
 })();
+
+// Abstração do Banco de Dados para suportar Redis ou Memória transparentemente
+const db = {
+    async get(key) {
+        if (useRedis && client.isOpen) return await client.get(key);
+        return memoryStore.get(key) || null;
+    },
+    async set(key, value) {
+        if (useRedis && client.isOpen) return await client.set(key, value);
+        memoryStore.set(key, value);
+        return 'OK';
+    },
+    async setEx(key, seconds, value) {
+        if (useRedis && client.isOpen) return await client.setEx(key, seconds, value);
+        memoryStore.set(key, value);
+        // Simulação simples de expiração
+        setTimeout(() => memoryStore.delete(key), seconds * 1000);
+        return 'OK';
+    },
+    async del(key) {
+        if (useRedis && client.isOpen) return await client.del(key);
+        return memoryStore.delete(key) ? 1 : 0;
+    },
+    async keys(pattern) {
+        if (useRedis && client.isOpen) return await client.keys(pattern);
+        
+        // Converte padrão Redis simples (minegen:project:*) para Regex
+        // Nota: Esta é uma aproximação para desenvolvimento local
+        const regexStr = '^' + pattern.replace(/:/g, ':').replace(/\*/g, '.*') + '$';
+        const regex = new RegExp(regexStr);
+        
+        return Array.from(memoryStore.keys()).filter(k => regex.test(k));
+    },
+    async mGet(keys) {
+        if (keys.length === 0) return [];
+        if (useRedis && client.isOpen) return await client.mGet(keys);
+        return keys.map(k => memoryStore.get(k) || null);
+    },
+    async exists(key) {
+        if (useRedis && client.isOpen) return await client.exists(key);
+        return memoryStore.has(key) ? 1 : 0;
+    }
+};
 
 // Helper Functions
 const getKey = (type, id) => `minegen:${type}:${id}`;
@@ -42,10 +96,8 @@ router.post('/auth/register', async (req, res) => {
   try {
     const { username, email, password, savedApiKey } = req.body;
 
-    // Verificar se email já existe (Ineficiente no Redis puro sem índice secundário, 
-    // mas para MVP faremos um scan ou hash map de emails. Usaremos um Hash Map de emails)
     const emailKey = getKey('email_map', email);
-    const existingId = await client.get(emailKey);
+    const existingId = await db.get(emailKey);
 
     if (existingId) {
       return res.status(400).json({ message: 'E-mail já cadastrado.' });
@@ -61,15 +113,14 @@ router.post('/auth/register', async (req, res) => {
       lastSeen: Date.now()
     };
 
-    // Salvar User e Mapeamento Email -> ID
-    await client.set(getKey('user', userId), JSON.stringify(newUser));
-    await client.set(emailKey, userId);
+    await db.set(getKey('user', userId), JSON.stringify(newUser));
+    await db.set(emailKey, userId);
 
     const { password: _, ...userWithoutPass } = newUser;
     res.json(userWithoutPass);
   } catch (e) {
     console.error(e);
-    res.status(500).json({ message: 'Erro ao registrar.' });
+    res.status(500).json({ message: 'Erro interno ao registrar usuário.' });
   }
 });
 
@@ -77,17 +128,17 @@ router.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    const userId = await client.get(getKey('email_map', email));
+    const userId = await db.get(getKey('email_map', email));
     if (!userId) return res.status(401).json({ message: 'Credenciais inválidas.' });
 
-    const userJson = await client.get(getKey('user', userId));
+    const userJson = await db.get(getKey('user', userId));
     if (!userJson) return res.status(404).json({ message: 'Usuário não encontrado.' });
 
     const user = JSON.parse(userJson);
     if (user.password !== password) return res.status(401).json({ message: 'Credenciais inválidas.' });
 
     user.lastSeen = Date.now();
-    await client.set(getKey('user', userId), JSON.stringify(user));
+    await db.set(getKey('user', userId), JSON.stringify(user));
 
     const { password: _, ...userWithoutPass } = user;
     res.json(userWithoutPass);
@@ -101,15 +152,14 @@ router.put('/users/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
     
-    const userJson = await client.get(getKey('user', id));
+    const userJson = await db.get(getKey('user', id));
     if (!userJson) return res.status(404).json({ message: 'User not found' });
 
     const user = JSON.parse(userJson);
     const updatedUser = { ...user, ...updates };
-    // Preservar senha se não enviada
     if (!updates.password) updatedUser.password = user.password;
 
-    await client.set(getKey('user', id), JSON.stringify(updatedUser));
+    await db.set(getKey('user', id), JSON.stringify(updatedUser));
     
     const { password: _, ...clean } = updatedUser;
     res.json(clean);
@@ -119,13 +169,12 @@ router.put('/users/:id', async (req, res) => {
 router.delete('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const userJson = await client.get(getKey('user', id));
+    const userJson = await db.get(getKey('user', id));
     if (userJson) {
         const user = JSON.parse(userJson);
-        await client.del(getKey('email_map', user.email));
+        await db.del(getKey('email_map', user.email));
     }
-    await client.del(getKey('user', id));
-    // Nota: Não estamos deletando os projetos do usuário aqui para simplificar
+    await db.del(getKey('user', id));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ message: 'Erro ao deletar.' }); }
 });
@@ -137,20 +186,14 @@ router.get('/projects', async (req, res) => {
     const { ownerId } = req.query;
     if (!ownerId) return res.json([]);
 
-    // Busca o email do usuário para verificar participação
-    const userJson = await client.get(getKey('user', ownerId));
+    const userJson = await db.get(getKey('user', ownerId));
     if (!userJson) return res.json([]);
     const userEmail = JSON.parse(userJson).email;
 
-    // Scan não é ideal para produção em massa, mas serve para MVP. 
-    // Ideal: Ter um Set `user_projects:{userId}` com IDs dos projetos.
-    // Vamos usar SCAN para buscar todos os projetos e filtrar (lento se tiver milhares, ok para MVP)
-    
-    const keys = await client.keys('minegen:project:*');
+    const keys = await db.keys('minegen:project:*');
     if (keys.length === 0) return res.json([]);
 
-    // MGET para pegar todos de uma vez
-    const projectsJson = await client.mGet(keys);
+    const projectsJson = await db.mGet(keys);
     const projects = projectsJson
         .map(p => p ? JSON.parse(p) : null)
         .filter(p => p && (p.ownerId === ownerId || (p.members && p.members.includes(userEmail))));
@@ -170,7 +213,7 @@ router.put('/projects/:id', async (req, res) => {
     // Atualizar lastModified
     projectData.lastModified = Date.now();
 
-    await client.set(getKey('project', id), JSON.stringify(projectData));
+    await db.set(getKey('project', id), JSON.stringify(projectData));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ message: 'Erro ao salvar projeto.' }); }
 });
@@ -178,7 +221,7 @@ router.put('/projects/:id', async (req, res) => {
 router.delete('/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    await client.del(getKey('project', id));
+    await db.del(getKey('project', id));
     res.json({ success: true });
   } catch (e) { res.status(500).json({ message: 'Erro ao deletar projeto.' }); }
 });
@@ -188,12 +231,16 @@ router.delete('/projects/:id', async (req, res) => {
 router.post('/invites/link', async (req, res) => {
   try {
     const { projectId, createdBy } = req.body;
-    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     
+    const projectExists = await db.exists(getKey('project', projectId));
+    if (!projectExists) {
+        return res.status(404).json({ message: 'Projeto não encontrado. Salve-o primeiro.' });
+    }
+
+    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
     const linkData = { token, projectId, createdBy, timestamp: Date.now() };
     
-    // Salva o link com expiração de 24h (86400s)
-    await client.setEx(getKey('link', token), 86400, JSON.stringify(linkData));
+    await db.setEx(getKey('link', token), 86400, JSON.stringify(linkData));
     
     res.json({ token });
   } catch (e) { res.status(500).json({ message: 'Erro ao gerar link.' }); }
@@ -203,12 +250,12 @@ router.post('/invites/join', async (req, res) => {
   try {
     const { token, userEmail } = req.body;
     
-    const linkJson = await client.get(getKey('link', token));
+    const linkJson = await db.get(getKey('link', token));
     if (!linkJson) return res.status(404).json({ message: 'Link inválido ou expirado.' });
     
     const link = JSON.parse(linkJson);
     const projectKey = getKey('project', link.projectId);
-    const projectJson = await client.get(projectKey);
+    const projectJson = await db.get(projectKey);
     
     if (!projectJson) return res.status(404).json({ message: 'Projeto não existe mais.' });
     
@@ -217,8 +264,8 @@ router.post('/invites/join', async (req, res) => {
     if (!project.members) project.members = [];
     if (!project.members.includes(userEmail)) {
         project.members.push(userEmail);
-        project.lastModified = Date.now(); // Força update para todos
-        await client.set(projectKey, JSON.stringify(project));
+        project.lastModified = Date.now(); 
+        await db.set(projectKey, JSON.stringify(project));
     }
     
     res.json(project);
@@ -229,8 +276,7 @@ router.post('/invites/send', async (req, res) => {
   try {
     const { projectId, projectName, senderId, senderName, targetEmail } = req.body;
     
-    // Verifica se target existe
-    const targetId = await client.get(getKey('email_map', targetEmail));
+    const targetId = await db.get(getKey('email_map', targetEmail));
     if (!targetId) return res.status(404).json({ message: 'Usuário não encontrado.' });
 
     const inviteId = Math.random().toString(36).substr(2, 9);
@@ -240,8 +286,7 @@ router.post('/invites/send', async (req, res) => {
       status: 'pending', timestamp: Date.now()
     };
 
-    // Salva convite
-    await client.set(getKey('invite', inviteId), JSON.stringify(invite));
+    await db.set(getKey('invite', inviteId), JSON.stringify(invite));
     
     res.json({ success: true });
   } catch (e) { res.status(500).json({ message: 'Erro ao enviar convite.' }); }
@@ -251,11 +296,10 @@ router.get('/invites/pending', async (req, res) => {
   try {
     const { email } = req.query;
     
-    // Mesma lógica de Scan (ideal seria uma lista por usuário)
-    const keys = await client.keys('minegen:invite:*');
+    const keys = await db.keys('minegen:invite:*');
     if (keys.length === 0) return res.json([]);
     
-    const invitesJson = await client.mGet(keys);
+    const invitesJson = await db.mGet(keys);
     const invites = invitesJson
         .map(i => i ? JSON.parse(i) : null)
         .filter(i => i && i.targetEmail === email && i.status === 'pending');
@@ -270,7 +314,7 @@ router.post('/invites/:id/respond', async (req, res) => {
     const { accept } = req.body;
     
     const inviteKey = getKey('invite', id);
-    const inviteJson = await client.get(inviteKey);
+    const inviteJson = await db.get(inviteKey);
     
     if (!inviteJson) return res.status(404).json({ message: 'Convite não encontrado.' });
     
@@ -279,7 +323,7 @@ router.post('/invites/:id/respond', async (req, res) => {
     let project = null;
     if (accept) {
         const projectKey = getKey('project', invite.projectId);
-        const projectJson = await client.get(projectKey);
+        const projectJson = await db.get(projectKey);
         
         if (projectJson) {
             project = JSON.parse(projectJson);
@@ -287,13 +331,12 @@ router.post('/invites/:id/respond', async (req, res) => {
             if (!project.members.includes(invite.targetEmail)) {
                 project.members.push(invite.targetEmail);
                 project.lastModified = Date.now();
-                await client.set(projectKey, JSON.stringify(project));
+                await db.set(projectKey, JSON.stringify(project));
             }
         }
     }
     
-    // Deleta o convite após responder
-    await client.del(inviteKey);
+    await db.del(inviteKey);
     
     res.json(project || { success: true });
   } catch (e) { res.status(500).json({ message: 'Erro ao responder.' }); }
