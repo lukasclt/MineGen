@@ -31,6 +31,10 @@ const App: React.FC = () => {
   const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
   const [incomingInvite, setIncomingInvite] = useState<Invite | null>(null);
   
+  // Refs para controle de concorrência e loops rápidos
+  const isSyncingRef = useRef(false);
+  const lastSavedStateRef = useRef<string>('');
+  
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
   const isBackendConnected = !!((process.env as any).API_URL || true); 
 
@@ -58,14 +62,8 @@ const App: React.FC = () => {
         if (savedUser) {
           const user = JSON.parse(savedUser);
           setCurrentUser(user);
-          setIsCloudSyncing(true);
-          try {
-            await syncWithCloud(user.id);
-          } catch (err) {
-            addLog("Aviso: Falha ao conectar na nuvem.");
-          } finally {
-            setIsCloudSyncing(false);
-          }
+          // Sync inicial forçado
+          await syncWithCloud(user.id);
           checkInviteLink(user);
         }
       } catch (e) {
@@ -86,6 +84,7 @@ const App: React.FC = () => {
         if (p.ownerId === currentUser.id && p.ownerName !== currentUser.username) {
             changed = true;
             const updated = { ...p, ownerName: currentUser.username };
+            // Fire and forget save
             dbService.saveProject(updated).catch(err => console.error("Auto-patch save failed", err));
             return updated;
         }
@@ -94,66 +93,80 @@ const App: React.FC = () => {
 
     if (changed) {
         setProjects(updatedProjects);
-        console.log("Sistema: Projetos atualizados com nome do dono correto.");
     }
   }, [currentUser, projects.length, isLoaded]);
 
 
   const syncWithCloud = async (userId: string) => {
-    const cloudProjects = await dbService.loadUserProjects(userId);
-    if (cloudProjects.length > 0) {
-      setProjects(prevLocal => {
-        const merged = [...prevLocal];
-        const sanitizedCloud = cloudProjects.map(p => ({
-            ...p, 
-            members: p.members || [],
-            ownerName: p.ownerName || 'Desconhecido' 
-        }));
+    // Mutex para evitar sobreposição de requisições com intervalo curto
+    if (isSyncingRef.current) return;
+    isSyncingRef.current = true;
+    setIsCloudSyncing(true);
 
-        sanitizedCloud.forEach(cloudP => {
-          const localIdx = merged.findIndex(p => p.id === cloudP.id);
-          if (localIdx === -1) {
-            merged.push(cloudP);
-          } else {
-            const localP = merged[localIdx];
-            
-            // --- SMART MERGE (SEGUNDO PLANO) ---
-            
-            // 1. Prioridade de Dados (Race Condition Fix)
-            // Se o local foi modificado RECENTEMENTE (ex: digitando código), ele "ganha" na estrutura de arquivos.
-            // Se a nuvem for mais nova (ex: outro dev salvou), a nuvem ganha.
-            const isLocalNewer = localP.lastModified > cloudP.lastModified;
+    try {
+        const cloudProjects = await dbService.loadUserProjects(userId);
+        
+        if (cloudProjects.length > 0) {
+          setProjects(prevLocal => {
+            const merged = [...prevLocal];
+            const sanitizedCloud = cloudProjects.map(p => ({
+                ...p, 
+                members: p.members || [],
+                ownerName: p.ownerName || 'Desconhecido' 
+            }));
 
-            // 2. Mesclagem de Mensagens COM SUPORTE A "LIMPAR CHAT"
-            // Começa com as mensagens da nuvem (fonte da verdade)
-            const cloudMsgIds = new Set(cloudP.messages.map(m => m.id));
-            
-            // Adiciona mensagens locais pendentes, MAS...
-            // Só adiciona se forem MAIS NOVAS que a última atualização da nuvem.
-            // Se a nuvem foi atualizada recentemente e a mensagem local não está lá, 
-            // assumimos que ela foi deletada (Clear Chat) ou é antiga.
-            const pendingLocalMessages = localP.messages.filter(m => {
-                const isNewerThanCloud = (m.timestamp || 0) > cloudP.lastModified;
-                const notInCloud = !cloudMsgIds.has(m.id);
-                // Mantém se não estiver na nuvem E for uma mensagem muito recente (criada após o sync da nuvem)
-                return notInCloud && isNewerThanCloud; 
+            let hasChanges = false;
+
+            sanitizedCloud.forEach(cloudP => {
+              const localIdx = merged.findIndex(p => p.id === cloudP.id);
+              if (localIdx === -1) {
+                merged.push(cloudP);
+                hasChanges = true;
+              } else {
+                const localP = merged[localIdx];
+                
+                // Se a nuvem tem uma versão mais nova, ELA GANHA.
+                // Isso é crucial para que quando um Admin limpe o chat ou mude config,
+                // o Editor receba a atualização imediatamente.
+                if (cloudP.lastModified > localP.lastModified) {
+                    // Mesclagem Inteligente de Mensagens
+                    // Queremos pegar tudo da nuvem, mas preservar mensagens que o usuário ACABOU de enviar
+                    // e que talvez ainda não tenham subido (race condition de milissegundos).
+                    
+                    const cloudMsgIds = new Set(cloudP.messages.map(m => m.id));
+                    
+                    // Mensagens locais que são MAIS NOVAS que a última vez que a nuvem foi tocada.
+                    // Isso evita que mensagens antigas "renasçam" (Zumbis) após um Clear Chat.
+                    const recentLocalMessages = localP.messages.filter(m => {
+                        return !cloudMsgIds.has(m.id) && (m.timestamp || 0) > cloudP.lastModified;
+                    });
+
+                    // Se a config mudou na nuvem, aceitamos a da nuvem.
+                    const finalSettings = cloudP.lastModified > localP.lastModified ? cloudP.settings : localP.settings;
+                    
+                    // Se o projeto foi gerado na nuvem (resposta do agente), aceitamos.
+                    const finalGenerated = cloudP.lastModified > localP.lastModified ? cloudP.generatedProject : localP.generatedProject;
+
+                    merged[localIdx] = {
+                        ...cloudP,
+                        messages: [...cloudP.messages, ...recentLocalMessages], // Nuvem + Pendentes Recentes
+                        settings: finalSettings,
+                        generatedProject: finalGenerated,
+                        lastModified: Math.max(localP.lastModified, cloudP.lastModified)
+                    };
+                    hasChanges = true;
+                }
+              }
             });
-            
-            // Junta tudo
-            const finalMessages = [...cloudP.messages, ...pendingLocalMessages];
 
-            // 3. Atualiza o objeto do projeto preservando o estado local se for mais recente
-            merged[localIdx] = {
-                ...cloudP, // Baseia-se na nuvem para metadados (membros, id, etc)
-                messages: finalMessages, // Usa a lista mesclada segura
-                generatedProject: isLocalNewer ? localP.generatedProject : cloudP.generatedProject, // Protege código não salvo
-                settings: isLocalNewer ? localP.settings : cloudP.settings, // Protege configs não salvas
-                lastModified: Math.max(localP.lastModified, cloudP.lastModified) // Avança o relógio
-            };
-          }
-        });
-        return merged;
-      });
+            return hasChanges ? merged : prevLocal;
+          });
+        }
+    } catch (e) {
+        // Silently fail on network glitches to keep UI smooth
+    } finally {
+        setIsCloudSyncing(false);
+        isSyncingRef.current = false;
     }
   };
 
@@ -161,7 +174,6 @@ const App: React.FC = () => {
       const urlParams = new URLSearchParams(window.location.search);
       const inviteToken = urlParams.get('invite');
       if (inviteToken) {
-          setIsCloudSyncing(true);
           try {
               addLog("Sistema: Processando link de convite...");
               const project = await dbService.joinProjectByLink(inviteToken, user.email);
@@ -176,15 +188,17 @@ const App: React.FC = () => {
           } catch (e: any) {
               addLog(`Erro Convite: ${e.message}`);
               playSound('error');
-          } finally {
-              setIsCloudSyncing(false);
           }
       }
   };
 
+  // LOOP DE SINCRONIZAÇÃO ULTRA-RÁPIDO (HEARTBEAT)
   useEffect(() => {
     if (!currentUser) return;
-    const syncIntervalTime = currentProjectId ? 2000 : 8000; 
+    
+    // Se tiver projeto ativo, sync a cada 800ms (High Performance Mode)
+    // Se não, a cada 5s (Idle Mode)
+    const syncIntervalTime = currentProjectId ? 800 : 5000; 
 
     const syncLoop = async () => {
         if (!document.hidden) { 
@@ -211,18 +225,35 @@ const App: React.FC = () => {
     };
   }, [currentUser, incomingInvite, currentProjectId]); 
 
+  // PUSH IMMEDIATO DE ALTERAÇÕES LOCAIS (SAVE)
   useEffect(() => {
     if (isLoaded) {
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
       localStorage.setItem('minegen_projects', JSON.stringify(projects));
+      
       if (currentUser) {
         localStorage.setItem('minegen_user', JSON.stringify(currentUser));
-        if (activeProject) dbService.saveProject(activeProject);
+        
+        if (activeProject) {
+            // Verifica se houve mudança real antes de enviar para rede para economizar banda
+            const currentStateStr = JSON.stringify({
+                msgs: activeProject.messages.length,
+                lastMod: activeProject.lastModified,
+                settings: activeProject.settings,
+                code: activeProject.generatedProject?.files.length
+            });
+
+            if (currentStateStr !== lastSavedStateRef.current) {
+                lastSavedStateRef.current = currentStateStr;
+                // Envia imediatamente para a nuvem (Fire and Forget)
+                dbService.saveProject(activeProject).catch(e => console.warn("Background save warning:", e));
+            }
+        }
       } else {
         localStorage.removeItem('minegen_user');
       }
     }
-  }, [projects, currentUser, isLoaded, currentProjectId]);
+  }, [projects, currentUser, isLoaded, currentProjectId, activeProject]);
 
   useEffect(() => {
     const loadHandle = async () => {
@@ -241,7 +272,7 @@ const App: React.FC = () => {
     loadHandle();
   }, [currentProjectId]);
 
-  // AUTO-SYNC STATE TO DISK
+  // AUTO-SYNC STATE TO DISK (Local File System)
   useEffect(() => {
       if (!activeProject || !directoryHandle || !hasFilePermission) return;
       
@@ -275,9 +306,8 @@ const App: React.FC = () => {
 
   const handleAuthSuccess = async (user: User) => {
     setCurrentUser(user);
-    setIsCloudSyncing(true);
+    // Sync imediato ao logar
     await syncWithCloud(user.id);
-    setIsCloudSyncing(false);
     setIsAuthModalOpen(false);
     addLog(`Sistema: Bem-vindo, ${user.username}!`);
     playSound('success');
