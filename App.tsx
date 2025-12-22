@@ -120,16 +120,10 @@ const App: React.FC = () => {
           } else {
             const localP = merged[localIdx];
             
-            // Lógica de Merge:
-            // Sincroniza se o cloud for mais novo, se tiver mais mensagens OU se a lista de membros for diferente
-            const cloudMessagesHash = JSON.stringify(cloudP.messages.map(m => m.status + m.id));
-            const localMessagesHash = JSON.stringify(localP.messages.map(m => m.status + m.id));
-            const cloudMembersHash = JSON.stringify(cloudP.members.sort());
-            const localMembersHash = JSON.stringify(localP.members.sort());
-
-            if (cloudP.lastModified > localP.lastModified || 
-                cloudMessagesHash !== localMessagesHash ||
-                cloudMembersHash !== localMembersHash) {
+            // CORREÇÃO DE SYNC: Só sobrescreve o local se o Cloud for ESTRITAMENTE MAIS RECENTE.
+            // Isso evita que alterações locais recentes (mensagens enviadas) sejam sobrescritas pelo estado antigo da nuvem
+            // antes que o salvamento assíncrono ocorra.
+            if (cloudP.lastModified > localP.lastModified) {
                merged[localIdx] = cloudP;
             }
           }
@@ -452,7 +446,11 @@ const App: React.FC = () => {
         onSelectProject={setCurrentProjectId} onCreateProject={handleOpenOrNewProject}
         onDeleteProject={handleDeleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
-        setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, settings: typeof newS === 'function' ? newS(p.settings) : newS } : p))}
+        setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
+            ...p, 
+            settings: typeof newS === 'function' ? newS(p.settings) : newS,
+            lastModified: Date.now() // Atualiza timestamp ao mudar configs
+        } : p))}
         currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
         onInviteMember={handleInvite}
         onRemoveMember={handleRemoveMember}
@@ -464,7 +462,11 @@ const App: React.FC = () => {
           {activeProject ? (
             <ChatInterface 
               key={activeProject.id} settings={activeProject.settings} messages={activeProject.messages}
-              setMessages={upd => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, messages: typeof upd === 'function' ? upd(p.messages) : upd } : p))}
+              setMessages={upd => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
+                  ...p, 
+                  messages: typeof upd === 'function' ? upd(p.messages) : upd,
+                  lastModified: Date.now() // Atualiza timestamp ao enviar mensagem
+              } : p))}
               currentProject={activeProject.generatedProject} onProjectGenerated={handleProjectGenerated}
               directoryHandle={directoryHandle} onSetDirectoryHandle={setDirectoryHandle}
               pendingMessage={pendingAiMessage} onClearPendingMessage={() => setPendingAiMessage(null)}
