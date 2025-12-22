@@ -50,16 +50,19 @@ const App: React.FC = () => {
           setIsCloudSyncing(true);
           const cloudProjects = await dbService.loadUserProjects(user.id);
           if (cloudProjects.length > 0) {
-            setProjects(cloudProjects);
+            // Garante que members existe
+            const sanitized = cloudProjects.map(p => ({...p, members: p.members || []}));
+            setProjects(sanitized);
             addLog("Sistema: Projetos sincronizados com Vercel Blob.");
-          } else {
-            const savedProjectsStr = localStorage.getItem('minegen_projects');
-            if (savedProjectsStr) setProjects(JSON.parse(savedProjectsStr));
           }
           setIsCloudSyncing(false);
+          
+          // Checar link de convite pendente na URL
+          checkInviteLink(user);
+
         } else {
-          const savedProjectsStr = localStorage.getItem('minegen_projects');
-          if (savedProjectsStr) setProjects(JSON.parse(savedProjectsStr));
+          // Se não houver usuário, apenas inicializamos vazio, pois o bloqueio de login será renderizado
+          // Não carregamos projetos locais sem login agora
         }
 
         const savedLastId = localStorage.getItem('minegen_last_project_id');
@@ -72,6 +75,32 @@ const App: React.FC = () => {
     };
     init();
   }, []);
+
+  const checkInviteLink = async (user: User) => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const inviteToken = urlParams.get('invite');
+      if (inviteToken) {
+          setIsCloudSyncing(true);
+          try {
+              addLog("Sistema: Processando link de convite...");
+              const project = await dbService.joinProjectByLink(inviteToken, user.email);
+              setProjects(prev => {
+                  if (prev.find(p => p.id === project.id)) return prev;
+                  return [project, ...prev];
+              });
+              setCurrentProjectId(project.id);
+              playSound('success');
+              addLog(`Sistema: Você entrou no projeto ${project.name} via link!`);
+              // Limpar URL
+              window.history.replaceState({}, document.title, window.location.pathname);
+          } catch (e: any) {
+              addLog(`Erro Convite: ${e.message}`);
+              playSound('error');
+          } finally {
+              setIsCloudSyncing(false);
+          }
+      }
+  };
 
   // Polling de Convites
   useEffect(() => {
@@ -94,7 +123,6 @@ const App: React.FC = () => {
   // Persistência em cada mudança (Cloud Sync)
   useEffect(() => {
     if (isLoaded) {
-      localStorage.setItem('minegen_projects', JSON.stringify(projects));
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
       
       if (currentUser) {
@@ -127,12 +155,17 @@ const App: React.FC = () => {
     setIsCloudSyncing(true);
     const cloudProjects = await dbService.loadUserProjects(user.id);
     if (cloudProjects.length > 0) {
-      setProjects(cloudProjects);
+      const sanitized = cloudProjects.map(p => ({...p, members: p.members || []}));
+      setProjects(sanitized);
     }
     setIsCloudSyncing(false);
     setIsAuthModalOpen(false);
+    
     addLog(`Sistema: Bem-vindo, ${user.username}!`);
     playSound('success');
+    
+    // Verificar convite agora que logou
+    checkInviteLink(user);
   };
 
   const handleDeleteAccount = async () => {
@@ -159,7 +192,7 @@ const App: React.FC = () => {
 
   const handleInvite = (email: string) => {
     if (!activeProject) return;
-    setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, members: [...p.members, email] } : p));
+    setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, members: [...(p.members || []), email] } : p));
     addLog(`Sistema: Convite adicionado localmente para ${email}.`);
   };
 
@@ -170,8 +203,9 @@ const App: React.FC = () => {
     try {
       const project = await dbService.respondToInvite(incomingInvite.id, accept);
       if (accept && project) {
-         setProjects(prev => [project, ...prev]);
-         setCurrentProjectId(project.id);
+         const sanitized = { ...project, members: project.members || [] };
+         setProjects(prev => [sanitized, ...prev]);
+         setCurrentProjectId(sanitized.id);
          playSound('success');
          addLog(`Sistema: Você entrou no projeto ${project.name}.`);
       } else if (!accept) {
@@ -192,14 +226,15 @@ const App: React.FC = () => {
       if (!handle) return; 
       const existing = await loadProjectStateFromDisk(handle);
       if (existing) {
+          const safeExisting = { ...existing, members: existing.members || [] };
           setProjects(prev => {
-              const exists = prev.find(p => p.id === existing.id);
-              if (exists) return prev.map(p => p.id === existing.id ? existing : p);
-              return [existing, ...prev];
+              const exists = prev.find(p => p.id === safeExisting.id);
+              if (exists) return prev.map(p => p.id === safeExisting.id ? safeExisting : p);
+              return [safeExisting, ...prev];
           });
-          setCurrentProjectId(existing.id);
+          setCurrentProjectId(safeExisting.id);
           setDirectoryHandle(handle);
-          await saveDirectoryHandleToDB(existing.id, handle);
+          await saveDirectoryHandleToDB(safeExisting.id, handle);
       } else {
           const loaded = await readProjectFromDisk(handle);
           const detected = detectProjectSettings(loaded.files);
@@ -240,6 +275,24 @@ const App: React.FC = () => {
   };
 
   if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace Cloud...</div>;
+
+  // LOGIN OBRIGATÓRIO: Se não houver currentUser, mostra AuthModal sem botão de fechar
+  if (!currentUser) {
+      return (
+          <div className="h-[100dvh] w-full bg-[#1e1e1e] flex items-center justify-center relative overflow-hidden">
+             {/* Fundo Animado Simples */}
+             <div className="absolute inset-0 bg-grid-animate opacity-20 pointer-events-none"></div>
+             <div className="absolute inset-0 bg-radial-gradient pointer-events-none"></div>
+             
+             <AuthModal 
+               isOpen={true} 
+               onClose={() => {}} // No-op
+               onAuthSuccess={handleAuthSuccess}
+               canClose={false}
+             />
+          </div>
+      );
+  }
 
   return (
     <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">

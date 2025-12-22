@@ -105,10 +105,34 @@ export const dbService = {
     });
 
     if (response.status === 404) throw new Error("Usuário não encontrado.");
-    if (response.status === 409) throw new Error("Usuário offline.");
     if (!response.ok) throw new Error("Erro ao enviar convite.");
     
     return true;
+  },
+
+  async createInviteLink(projectId: string, createdBy: string): Promise<string> {
+    const response = await fetch(`${API_BASE}/invites/link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId, createdBy })
+    });
+    if (!response.ok) throw new Error("Erro ao criar link.");
+    const data = await response.json();
+    return data.token;
+  },
+
+  async joinProjectByLink(token: string, userEmail: string): Promise<SavedProject> {
+    const response = await fetch(`${API_BASE}/invites/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, userEmail })
+    });
+    
+    if (!response.ok) {
+       const err = await response.json();
+       throw new Error(err.message || "Erro ao entrar via link.");
+    }
+    return await response.json();
   },
 
   async checkPendingInvites(userEmail: string): Promise<Invite[]> {

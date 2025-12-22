@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem, User } from '../types';
 import { MC_VERSIONS, OPENROUTER_MODELS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket, Users, UserPlus, Shield, LogOut, ChevronRight, Settings2, UserX, Loader2, AlertCircle } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket, Users, UserPlus, Shield, LogOut, ChevronRight, Settings2, UserX, Loader2, AlertCircle, Link, Check, Copy } from 'lucide-react';
 import { dbService } from '../services/dbService';
 import { playSound } from '../services/audioService';
 
@@ -26,7 +26,7 @@ interface ConfigSidebarProps {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void; 
   onDeleteProject: (id: string) => void;
-  onInviteMember: (email: string) => void; // Mantido para compatibilidade, mas lógica movida pra cá
+  onInviteMember: (email: string) => void; 
 }
 
 const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ 
@@ -39,6 +39,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
   const [isInviting, setIsInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [generatedLink, setGeneratedLink] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const handleChange = (field: keyof PluginSettings, value: any) => {
     setSettings(prev => ({ ...prev, [field]: value }));
@@ -55,7 +57,6 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
     setInviteError(null);
 
     try {
-      // Tenta enviar o convite pelo DB Service
       await dbService.sendInvite(
         activeProject.id,
         activeProject.name,
@@ -63,19 +64,39 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
         currentUser.username,
         inviteEmail
       );
-
       playSound('success');
-      // Atualiza lista localmente apenas para feedback visual imediato (opcional)
       onInviteMember(inviteEmail); 
       setInviteEmail('');
       alert(`Convite enviado para ${inviteEmail}!`);
-
     } catch (err: any) {
       playSound('error');
       setInviteError(err.message || "Erro ao enviar convite.");
     } finally {
       setIsInviting(false);
     }
+  };
+
+  const handleGenerateLink = async () => {
+    if (!currentUser || !activeProject) return;
+    setIsInviting(true);
+    try {
+        const token = await dbService.createInviteLink(activeProject.id, currentUser.id);
+        const url = `${window.location.origin}?invite=${token}`;
+        setGeneratedLink(url);
+        playSound('success');
+    } catch (e: any) {
+        setInviteError(e.message || "Erro ao gerar link");
+        playSound('error');
+    } finally {
+        setIsInviting(false);
+    }
+  };
+
+  const copyLink = () => {
+      navigator.clipboard.writeText(generatedLink);
+      setLinkCopied(true);
+      playSound('click');
+      setTimeout(() => setLinkCopied(false), 2000);
   };
 
   return (
@@ -193,10 +214,37 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                     {isInviting ? "Verificando..." : "Enviar Convite"}
                   </button>
                </form>
+               
+               <div className="relative flex py-2 items-center">
+                  <div className="flex-grow border-t border-gray-700"></div>
+                  <span className="flex-shrink-0 mx-2 text-[10px] text-gray-500">OU</span>
+                  <div className="flex-grow border-t border-gray-700"></div>
+               </div>
+
+               <div className="space-y-2">
+                 {generatedLink ? (
+                   <div className="bg-black/40 rounded border border-gray-600 p-2 flex items-center gap-2">
+                     <div className="flex-1 truncate text-[10px] text-mc-accent font-mono">{generatedLink}</div>
+                     <button onClick={copyLink} className="text-gray-400 hover:text-white">
+                        {linkCopied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                     </button>
+                   </div>
+                 ) : (
+                   <button 
+                     onClick={handleGenerateLink} 
+                     disabled={isConfigDisabled}
+                     className="w-full bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white font-bold text-xs py-2 rounded transition-all flex items-center justify-center gap-2"
+                   >
+                     <Link className="w-3.5 h-3.5" /> Gerar Link de Convite
+                   </button>
+                 )}
+               </div>
             </div>
 
             <div className="space-y-3">
-               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1">Participantes ({activeProject?.members.length || 0})</label>
+               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                 Participantes ({(activeProject?.members || []).length})
+               </label>
                {activeProject ? (
                  <div className="space-y-2">
                     <div className="flex items-center gap-3 p-2.5 bg-mc-accent/10 border border-mc-accent/20 rounded-lg">
@@ -207,9 +255,11 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                        </div>
                        <Shield className="w-3.5 h-3.5 text-mc-gold" />
                     </div>
-                    {activeProject.members.map((memberEmail, i) => (
+                    {(activeProject.members || []).map((memberEmail, i) => (
                       <div key={i} className="flex items-center gap-3 p-2.5 bg-gray-800/40 border border-gray-700 rounded-lg group">
-                        <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400">{memberEmail[0].toUpperCase()}</div>
+                        <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400">
+                          {memberEmail && memberEmail.length > 0 ? memberEmail[0].toUpperCase() : '?'}
+                        </div>
                         <div className="flex-1 min-w-0">
                            <p className="text-xs font-medium text-gray-300 truncate">{memberEmail}</p>
                            <p className="text-[9px] text-gray-500 uppercase">Editor</p>

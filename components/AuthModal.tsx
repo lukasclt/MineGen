@@ -9,9 +9,10 @@ interface AuthModalProps {
   onClose: () => void;
   onAuthSuccess: (user: User) => void;
   initialUser?: User | null;
+  canClose?: boolean; // Novo prop para login obrigatório
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, initialUser }) => {
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, initialUser, canClose = true }) => {
   const [mode, setMode] = useState<'login' | 'register' | 'profile'>(initialUser ? 'profile' : 'login');
   const [email, setEmail] = useState(initialUser?.email || '');
   const [password, setPassword] = useState('');
@@ -27,12 +28,10 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
       setEmail(initialUser.email);
       setUsername(initialUser.username);
       setApiKey(initialUser.savedApiKey || '');
-    } else {
-      setMode('login');
-      setPassword('');
-      setError('');
+    } else if (!canClose) {
+      setMode('login'); // Força login se for modal de bloqueio
     }
-  }, [initialUser, isOpen]);
+  }, [initialUser, isOpen, canClose]);
 
   if (!isOpen) return null;
 
@@ -47,7 +46,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
         
         const user = await dbService.loginUser(email, password);
         onAuthSuccess(user);
-        onClose();
+        if (canClose) onClose();
 
       } else if (mode === 'register') {
         if (!email || !password || !username) throw new Error('Todos os campos são obrigatórios.');
@@ -55,7 +54,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
         const newUser: Partial<User> = { username, email, savedApiKey: apiKey };
         const user = await dbService.registerUser(newUser, password);
         onAuthSuccess(user);
-        onClose();
+        if (canClose) onClose();
 
       } else if (mode === 'profile') {
         if (!initialUser) return;
@@ -67,7 +66,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
         };
         const finalUser = await dbService.updateUser(updatedUser);
         onAuthSuccess(finalUser);
-        onClose();
+        if (canClose) onClose();
       }
     } catch (err: any) {
       console.error(err);
@@ -90,9 +89,11 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, i
                mode === 'register' ? 'Criar Nova Conta' : 
                'Perfil do Desenvolvedor'}
             </h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-              <X className="w-6 h-6" />
-            </button>
+            {canClose && (
+              <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">

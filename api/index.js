@@ -19,7 +19,8 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 
 const DB_FILENAME = 'minegen_db.json';
-const INITIAL_DB = { users: [], projects: [], invites: [] };
+// Adicionado array inviteLinks
+const INITIAL_DB = { users: [], projects: [], invites: [], inviteLinks: [] };
 
 // --- Vercel Blob Helpers ---
 
@@ -52,7 +53,12 @@ async function readDB() {
     // Cache busting com timestamp para garantir dados frescos
     const response = await fetch(`${url}?t=${Date.now()}`);
     if (!response.ok) throw new Error('Falha ao baixar DB');
-    return await response.json();
+    const data = await response.json();
+    
+    // Migração simples para garantir estrutura
+    if (!data.inviteLinks) data.inviteLinks = [];
+    
+    return data;
   } catch (error) {
     console.error("Erro ao ler DB do Blob:", error);
     return INITIAL_DB;
@@ -200,7 +206,56 @@ router.delete('/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erro ao deletar projeto.' }); }
 });
 
-// CONVITES
+// CONVITES & LINKS
+
+// Gerar Link
+router.post('/invites/link', async (req, res) => {
+  try {
+    const { projectId, createdBy } = req.body;
+    const db = await readDB();
+    
+    // Verifica se já existe um link para este projeto para economizar espaço
+    let existing = db.inviteLinks.find(l => l.projectId === projectId);
+    
+    if (!existing) {
+      existing = {
+        token: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+        projectId,
+        createdBy,
+        timestamp: Date.now()
+      };
+      db.inviteLinks.push(existing);
+      await writeDB(db);
+    }
+    
+    res.json({ token: existing.token });
+  } catch (e) { res.status(500).json({ message: 'Erro ao gerar link.' }); }
+});
+
+// Entrar via Link
+router.post('/invites/join', async (req, res) => {
+  try {
+    const { token, userEmail } = req.body;
+    const db = await readDB();
+    
+    const link = db.inviteLinks.find(l => l.token === token);
+    if (!link) return res.status(404).json({ message: 'Link de convite inválido ou expirado.' });
+
+    const projectIdx = db.projects.findIndex(p => p.id === link.projectId);
+    if (projectIdx === -1) return res.status(404).json({ message: 'Projeto não existe mais.' });
+
+    // Adicionar membro
+    if (!db.projects[projectIdx].members) db.projects[projectIdx].members = [];
+    if (!db.projects[projectIdx].members.includes(userEmail)) {
+        db.projects[projectIdx].members.push(userEmail);
+        await writeDB(db);
+    }
+
+    res.json(db.projects[projectIdx]);
+  } catch (e) { res.status(500).json({ message: 'Erro ao entrar no projeto.' }); }
+});
+
+// Email Invites
 router.post('/invites/send', async (req, res) => {
   try {
     const { projectId, projectName, senderId, senderName, targetEmail } = req.body;
@@ -210,7 +265,10 @@ router.post('/invites/send', async (req, res) => {
     if (!target) return res.status(404).json({ message: 'Usuário não encontrado.' });
 
     const isOnline = target.lastSeen && (Date.now() - target.lastSeen < 10 * 60 * 1000); 
-    if (!isOnline) return res.status(409).json({ message: 'Usuário offline.' });
+    // Removida restrição estrita de online para permitir convites assíncronos, 
+    // mas mantendo aviso se desejar (opcional). O código original bloqueava.
+    // Vamos relaxar essa regra para UX melhor se o usuário existir.
+    // if (!isOnline) return res.status(409).json({ message: 'Usuário offline.' });
 
     db.invites.push({
       id: Math.random().toString(36).substr(2, 9),
