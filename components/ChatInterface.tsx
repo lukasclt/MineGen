@@ -58,6 +58,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null); // Ref para textarea
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // --- FILTRAGEM DE MENSAGENS POR THREAD ---
@@ -86,14 +87,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         
         // Membros
         (fullProject.members || []).forEach(email => {
-             // Tenta achar o nome nos metadados das mensagens ou usa o email
-             const senderMsg = messages.find(m => m.senderName && (m.threadId === email || m.senderId === email)); // Lógica simplificada
-             // Idealmente, SavedProject teria info de usuários, mas vamos usar o email/id como chave
-             // Como members é array de emails, precisamos mapear para ID se possível, ou usar email como ID de thread fake
-             // Mas o sistema usa User ID. Vamos assumir que members podem ter threads se já mandaram msg.
+             const senderMsg = messages.find(m => m.senderName && (m.threadId === email || m.senderId === email));
+             // Adiciona lógica extra se necessário para mapear emails para IDs reais
         });
         
-        // Adiciona threads que existem nas mensagens mas não estão na lista explicita (casos de convidados antigos)
+        // Adiciona threads que existem nas mensagens mas não estão na lista explicita
         const uniqueThreads = Array.from(new Set(messages.map(m => m.threadId).filter(Boolean)));
         uniqueThreads.forEach(tId => {
             if (!list.find(i => i.id === tId)) {
@@ -117,6 +115,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const isMyThread = currentUser && activeThreadId === currentUser.id;
 
+  // Auto-resize do Textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px';
+    }
+  }, [input]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -155,7 +160,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
         }, 200);
     } else {
-        // Se mudou de thread e a nova não está processando, reseta visual
         if (!isLocalProcessing) {
             setProgressValue(0);
             setTimeLeft(TIMEOUT_DURATION);
@@ -176,7 +180,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     if (pendingMessage) {
-        // Se receber código para inserir, força a troca para MINHA thread
         if (currentUser && activeThreadId !== currentUser.id) {
             setActiveThreadId(currentUser.id);
         }
@@ -302,13 +305,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleAddToQueue = (text: string) => {
     if (!text.trim() && attachments.length === 0) return;
-    if (!isMyThread) return; // Segurança extra
+    if (!isMyThread) return; 
 
     const msgId = generateUUID();
     
     const userMessage: ChatMessage = { 
         id: msgId, 
-        threadId: activeThreadId, // ID DO USUÁRIO
+        threadId: activeThreadId, 
         role: 'user', 
         text, 
         attachments: [...attachments], 
@@ -321,14 +324,24 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setQueue(prev => [...prev, { id: msgId, text, att: [...attachments] }]);
     setInput('');
     setAttachments([]);
+    
+    // Reseta altura do textarea
+    if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+    }
   };
 
   const handleClearThread = async () => {
     if (window.confirm("Limpar histórico DESTA conversa? Isso não afeta outros membros.")) {
-        // Remove apenas mensagens desta thread
         setMessages(prev => prev.filter(m => m.threadId !== activeThreadId));
         playSound('click');
-        // O App.tsx vai lidar com o salvamento no próximo ciclo
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleAddToQueue(input);
     }
   };
 
@@ -344,10 +357,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1e1e1e] relative">
+    <div className="flex flex-col h-full bg-[#1e1e1e] relative min-w-0">
       
       {/* HEADER: Thread Switcher */}
-      <div className="bg-[#252526] border-b border-[#333] px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 h-14">
+      <div className="bg-[#252526] border-b border-[#333] px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 h-14 z-20 shadow-sm">
          <span className="text-[10px] font-bold text-gray-500 uppercase shrink-0 mr-2 flex items-center gap-1">
             <Users className="w-3 h-3" /> Agentes:
          </span>
@@ -361,7 +374,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                    key={thread.id}
                    onClick={() => setActiveThreadId(thread.id)}
                    className={`
-                      relative group flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all min-w-[120px]
+                      relative group flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all min-w-[120px] shrink-0
                       ${isActive 
                           ? 'bg-gray-800 border-mc-accent shadow-md' 
                           : 'bg-[#1e1e1e] border-[#333] hover:border-gray-600 opacity-70 hover:opacity-100'}
@@ -385,19 +398,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       {/* Botão Flutuante de Limpar Chat (Thread Atual) */}
       {threadMessages.length > 0 && isMyThread && (
-          <button 
-             onClick={handleClearThread}
-             className="absolute top-16 right-4 z-10 p-1.5 bg-[#252526] hover:bg-red-900/40 text-gray-500 hover:text-red-400 rounded-md border border-[#333] hover:border-red-500/30 transition-all shadow-lg"
-             title="Limpar Esta Conversa"
-          >
-             <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="absolute top-16 right-4 z-10">
+            <button 
+                onClick={handleClearThread}
+                className="p-1.5 bg-[#252526]/80 hover:bg-red-900/80 text-gray-500 hover:text-red-200 rounded-md border border-[#333] hover:border-red-500/30 transition-all shadow-lg backdrop-blur-sm"
+                title="Limpar Esta Conversa"
+            >
+                <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
       )}
 
       {/* MENSAGENS */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar relative">
         {threadMessages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50">
+            <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50 select-none">
                 <Bot className="w-12 h-12 mb-2" />
                 <p className="text-sm font-medium">Chat do Agente de {threadList.find(t => t.id === activeThreadId)?.label}</p>
                 <p className="text-xs">Inicie uma conversa para gerar código.</p>
@@ -465,7 +480,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     </div>
                 ) : (
                     <div className={`px-4 py-2.5 rounded-lg text-sm shadow-sm relative ${msg.role === 'user' ? 'bg-[#264f78] text-white' : 'bg-[#252526] text-[#cccccc] border border-[#333]'} ${msg.isError ? 'border-red-500/50 bg-red-900/20 text-red-200' : ''}`}>
-                        <div className="whitespace-pre-wrap">{msg.text}</div>
+                        <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>
                         {msg.status === 'queued' && <div className="absolute -bottom-5 right-0 text-[10px] text-gray-500 bg-black/40 px-1.5 rounded-full"><Clock className="w-3 h-3 inline mr-1" /> Na Fila</div>}
                     </div>
                 )}
@@ -477,7 +492,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       </div>
 
       {/* INPUT AREA */}
-      <div className="p-3 bg-[#1e1e1e] border-t border-[#333]">
+      <div className="p-3 bg-[#1e1e1e] border-t border-[#333] shrink-0">
         {isMyThread ? (
              /* MODO EDITOR: POSSO ESCREVER */
             <>
@@ -492,7 +507,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     ))}
                 </div>
                 )}
-                <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2 items-center">
+                <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2 items-end">
                 
                 <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => {
                     const files = Array.from(e.target.files || []) as File[];
@@ -503,21 +518,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     });
                 }} />
                 
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white transition-colors"><Paperclip className="w-5 h-5" /></button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-gray-400 hover:text-white transition-colors mb-0.5"><Paperclip className="w-5 h-5" /></button>
                 
                 {processingMessage && isLocalProcessing ? (
                     <>
-                        <input 
-                        value={input} 
-                        onChange={e => setInput(e.target.value)} 
-                        placeholder="Adicionar à fila..." 
-                        className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent" 
-                        />
+                        <div className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2.5 text-sm text-gray-400 opacity-70 cursor-not-allowed">
+                            Aguarde a resposta da IA...
+                        </div>
                         
                         <button 
                         type="submit" 
                         disabled={!input.trim()} 
-                        className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 border border-gray-600 disabled:opacity-50"
+                        className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 border border-gray-600 disabled:opacity-50"
                         title="Adicionar à Fila"
                         >
                         <ListPlus className="w-4 h-4" />
@@ -525,16 +537,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     </>
                 ) : (
                     <>
-                        <input 
-                        value={input} 
-                        onChange={e => setInput(e.target.value)} 
-                        placeholder="Instrua o Agente..." 
-                        className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent" 
+                        <textarea
+                            ref={textareaRef}
+                            value={input} 
+                            onChange={e => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Instrua o Agente... (Shift+Enter para nova linha)" 
+                            rows={1}
+                            className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-mc-accent resize-none custom-scrollbar min-h-[42px] max-h-[150px]" 
                         />
                         <button 
                         type="submit" 
                         disabled={!input.trim() && attachments.length === 0} 
-                        className="bg-mc-accent hover:bg-blue-600 px-4 rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="bg-mc-accent hover:bg-blue-600 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed h-[42px] mb-[1px]"
                         >
                         <Send className="w-4 h-4 text-white" />
                         </button>
