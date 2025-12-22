@@ -67,31 +67,35 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         const startTime = processingMessage.timestamp || Date.now();
 
         interval = setInterval(() => {
-            const now = Date.now();
-            const elapsedSeconds = (now - startTime) / 1000;
-            const remaining = Math.max(0, TIMEOUT_DURATION - elapsedSeconds);
-            
-            setTimeLeft(Math.floor(remaining));
-
-            // Auto-cancelamento se estourar o tempo (apenas para quem está processando localmente)
-            if (remaining <= 0 && isLocalProcessing && abortControllerRef.current) {
-                 console.log("Timeout atingido. Reiniciando...");
-                 abortControllerRef.current.abort();
-            }
-
+            // VERIFICAÇÃO CRÍTICA: Se já atingiu 98% (IA respondeu), paramos o timer imediatamente.
+            // Usamos o state updater para garantir que lemos o valor mais recente.
             setProgressValue(prev => {
-                // Se já recebeu resposta da API (marcado logicamente como 98 ou mais), mantém
-                if (prev >= 98) return prev;
+                if (prev >= 98) {
+                    setTimeLeft(0); // Zera o timer visualmente pois já acabou a espera
+                    return prev;
+                }
+
+                // Lógica de tempo normal enquanto espera ( < 98% )
+                const now = Date.now();
+                const elapsedSeconds = (now - startTime) / 1000;
+                const remaining = Math.max(0, TIMEOUT_DURATION - elapsedSeconds);
+                
+                setTimeLeft(Math.floor(remaining));
+
+                // Auto-cancelamento se estourar o tempo (apenas para quem está processando localmente)
+                if (remaining <= 0 && isLocalProcessing && abortControllerRef.current) {
+                     console.log("Timeout atingido. Reiniciando...");
+                     abortControllerRef.current.abort();
+                }
 
                 // Cálculo de porcentagem baseado no tempo estimado vs decorrido
                 // Estimativa: uma geração média leva cerca de 45 segundos para chegar a 95%
                 const estimatedDuration = 45; 
                 let calculatedPct = (elapsedSeconds / estimatedDuration) * 95;
                 
-                // Limita a 95% até receber resposta real
+                // Limita a 95% até receber resposta real da API
                 if (calculatedPct > 95) calculatedPct = 95;
                 
-                // Garante que a barra nunca retroceda visualmente
                 return Math.max(prev, calculatedPct);
             });
 
@@ -182,6 +186,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       );
       
       // --- RESPOSTA RECEBIDA ---
+      // Setamos 98 imediatamente. O useEffect vai detectar isso e zerar o timer.
       setProgressValue(98);
 
       onProjectGenerated(project);
@@ -357,16 +362,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                    <CheckCircle2 className="w-3 h-3" /> Processamento Concluído
                                 </span>
                             ) : (
-                                /* ESTADO COM TIMER CONTINUO (MESMO EM 95%) */
+                                /* ESTADO COM TIMER */
                                 <>
-                                    {displayPercent >= 95 && (
+                                    {/* Se está em 95% ou mais, mostra estado de espera, mas com timer ZERADO se já respondeu (98%) */}
+                                    {displayPercent >= 95 && displayPercent < 98 && (
                                          <span className="text-mc-gold flex items-center gap-1 animate-pulse mr-2 border-r border-gray-600 pr-2">
                                            <HardDrive className="w-3 h-3" /> Aguardando API...
                                          </span>
                                     )}
                                     <Timer className="w-3 h-3" />
                                     <span>Tempo: <span className={timeLeft < 60 ? 'text-red-400' : 'text-white'}>{formatTime(timeLeft)}</span></span>
-                                    {timeLeft === 0 && <span className="text-mc-gold ml-1 animate-pulse">(Reiniciando...)</span>}
                                 </>
                             )}
                         </div>

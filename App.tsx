@@ -122,14 +122,22 @@ const App: React.FC = () => {
             // 1. Prioridade de Dados (Race Condition Fix)
             // Se o local foi modificado RECENTEMENTE (ex: digitando código), ele "ganha" na estrutura de arquivos.
             // Se a nuvem for mais nova (ex: outro dev salvou), a nuvem ganha.
-            // Mas para MENSAGENS, sempre fazemos append.
             const isLocalNewer = localP.lastModified > cloudP.lastModified;
 
-            // 2. Mesclagem de Mensagens
+            // 2. Mesclagem de Mensagens COM SUPORTE A "LIMPAR CHAT"
             // Começa com as mensagens da nuvem (fonte da verdade)
-            // Adiciona quaisquer mensagens locais que NÃO estejam na nuvem (mensagens enviadas recentemente)
             const cloudMsgIds = new Set(cloudP.messages.map(m => m.id));
-            const pendingLocalMessages = localP.messages.filter(m => !cloudMsgIds.has(m.id));
+            
+            // Adiciona mensagens locais pendentes, MAS...
+            // Só adiciona se forem MAIS NOVAS que a última atualização da nuvem.
+            // Se a nuvem foi atualizada recentemente e a mensagem local não está lá, 
+            // assumimos que ela foi deletada (Clear Chat) ou é antiga.
+            const pendingLocalMessages = localP.messages.filter(m => {
+                const isNewerThanCloud = (m.timestamp || 0) > cloudP.lastModified;
+                const notInCloud = !cloudMsgIds.has(m.id);
+                // Mantém se não estiver na nuvem E for uma mensagem muito recente (criada após o sync da nuvem)
+                return notInCloud && isNewerThanCloud; 
+            });
             
             // Junta tudo
             const finalMessages = [...cloudP.messages, ...pendingLocalMessages];
