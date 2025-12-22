@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from '../types';
-import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { saveProjectToDisk, readProjectFromDisk } from '../services/fileSystem';
 import { playSound, speakText, stopSpeech } from '../services/audioService';
@@ -68,7 +68,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsLoading(true);
     setReasoningStep(0);
     
-    // Intervalo para simular progresso visual
     const stepInterval = setInterval(() => {
         setReasoningStep(prev => {
             if (prev < REASONING_STEPS.length - 1) return prev + 1;
@@ -77,30 +76,42 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }, 1500);
 
     try {
-      // Passando o currentUser para usar a chave de API da conta
       const project = await generatePluginCode(text, settings, currentProject, currentAttachments, currentUser);
       clearInterval(stepInterval);
-      setReasoningStep(REASONING_STEPS.length - 1); // 100%
+      setReasoningStep(REASONING_STEPS.length - 1); 
       
+      let saveWarning = "";
+      
+      // Tenta salvar, mas não bloqueia se falhar (ex: falta de permissão no F5)
       if (directoryHandle) {
-        await saveProjectToDisk(directoryHandle, project);
+        try {
+            await saveProjectToDisk(directoryHandle, project);
+        } catch (saveError: any) {
+            console.warn("Falha no salvamento automático:", saveError);
+            saveWarning = "\n\n⚠️ **Aviso:** O código foi gerado mas não pôde ser salvo no disco automaticamente. Verifique se a pasta está conectada (ícone amarelo no topo).";
+        }
       }
+
       onProjectGenerated(project);
 
       setMessages((prev: ChatMessage[]): ChatMessage[] => {
         const updated = prev.map(m => m.id === messageId ? { ...m, status: 'done' as const } : m);
-        const modelResponse: ChatMessage = { role: 'model', text: project.explanation, projectData: project, status: 'done' };
+        const modelResponse: ChatMessage = { 
+            role: 'model', 
+            text: project.explanation + saveWarning, 
+            projectData: project, 
+            status: 'done' 
+        };
         return [...updated, modelResponse];
       });
 
       if (settings.enableSounds) playSound('success');
       if (settings.enableTTS) speakText(project.explanation);
+
     } catch (error: any) {
       clearInterval(stepInterval);
       setMessages(prev => {
-        // Atualiza a mensagem do usuário para erro, se necessário
         const updated = prev.map(m => m.id === messageId ? { ...m, status: 'done' as const, isError: true } : m);
-        // Adiciona a mensagem de erro da IA
         return [...updated, { 
             role: 'model', 
             text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
@@ -127,7 +138,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setAttachments([]);
   };
 
-  // Cálculo da porcentagem para a barra de progresso
   const progressPercent = Math.min(100, Math.round(((reasoningStep + 1) / REASONING_STEPS.length) * 100));
 
   return (
@@ -162,7 +172,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                    </span>
                    <span className="text-[10px] text-gray-500">{REASONING_STEPS[reasoningStep]}</span>
                 </div>
-                {/* Barra de Progresso */}
                 <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
                    <div 
                      className="h-full bg-mc-accent transition-all duration-500 ease-out"

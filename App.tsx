@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database, Check, X } from 'lucide-react';
+import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database, Check, X, FolderInput, AlertTriangle } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -8,7 +8,7 @@ import Terminal from './components/Terminal';
 import AuthModal from './components/AuthModal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile, User } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk } from './services/fileSystem';
+import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk, verifyPermission, checkPermissionStatus } from './services/fileSystem';
 import { dbService, Invite } from './services/dbService';
 import { playSound, speakText } from './services/audioService';
 
@@ -24,29 +24,25 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [directoryHandle, setDirectoryHandle] = useState<any>(null);
+  // Estado para controlar se temos permissão de escrita no handle atual
+  const [hasFilePermission, setHasFilePermission] = useState<boolean>(false);
+  
   const [isTerminalOpen, setIsTerminalOpen] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
-  
-  // Estado para convites pendentes
   const [incomingInvite, setIncomingInvite] = useState<Invite | null>(null);
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
-  
-  // Verifica se o backend está configurado (via API_URL ou padrão)
   const isBackendConnected = !!((process.env as any).API_URL || true); 
 
   const addLog = (m: string) => setTerminalLogs(prev => [...prev, m]);
 
-  // Carregamento inicial (LocalStorage + Tentativa de Cloud)
   useEffect(() => {
     const init = async () => {
       try {
-        // 1. Carregar Usuário Local
         const savedUser = localStorage.getItem('minegen_user');
-        
-        // 2. Carregar Projetos do Cache Local (IMEDIATO)
         const cachedProjects = localStorage.getItem('minegen_projects');
+        
         if (cachedProjects) {
           try {
             const parsedProjects = JSON.parse(cachedProjects);
@@ -57,19 +53,15 @@ const App: React.FC = () => {
           }
         }
 
-        // 3. Restaurar último projeto ativo
         const savedLastId = localStorage.getItem('minegen_last_project_id');
         if (savedLastId) setCurrentProjectId(savedLastId);
 
         if (savedUser) {
           const user = JSON.parse(savedUser);
           setCurrentUser(user);
-          
           setIsCloudSyncing(true);
           try {
-            // 4. Sincronizar com Nuvem (Merge Inteligente)
             const cloudProjects = await dbService.loadUserProjects(user.id);
-            
             if (cloudProjects.length > 0) {
               setProjects(prevLocal => {
                 const merged = [...prevLocal];
@@ -78,10 +70,8 @@ const App: React.FC = () => {
                 sanitizedCloud.forEach(cloudP => {
                   const localIdx = merged.findIndex(p => p.id === cloudP.id);
                   if (localIdx === -1) {
-                    // Novo projeto da nuvem
                     merged.push(cloudP);
                   } else {
-                    // Conflito: Mantém o mais recente
                     if (cloudP.lastModified > merged[localIdx].lastModified) {
                        merged[localIdx] = cloudP;
                     }
@@ -96,14 +86,8 @@ const App: React.FC = () => {
           } finally {
             setIsCloudSyncing(false);
           }
-          
-          // Checar link de convite pendente na URL
           checkInviteLink(user);
-
-        } else {
-          // Sem usuário, mantemos o estado carregado do cache local (se houver)
         }
-
       } catch (e) {
         console.error(e);
       } finally {
@@ -128,7 +112,6 @@ const App: React.FC = () => {
               setCurrentProjectId(project.id);
               playSound('success');
               addLog(`Sistema: Você entrou no projeto ${project.name} via link!`);
-              // Limpar URL
               window.history.replaceState({}, document.title, window.location.pathname);
           } catch (e: any) {
               addLog(`Erro Convite: ${e.message}`);
@@ -139,10 +122,8 @@ const App: React.FC = () => {
       }
   };
 
-  // Polling de Convites
   useEffect(() => {
     if (!currentUser) return;
-
     const checkInvites = async () => {
       const invites = await dbService.checkPendingInvites(currentUser.email);
       if (invites.length > 0 && !incomingInvite) {
@@ -152,46 +133,58 @@ const App: React.FC = () => {
         speakText(`Você tem um novo convite de ${invite.senderName} para o projeto ${invite.projectName}`);
       }
     };
-
-    const interval = setInterval(checkInvites, 5000); // Checa a cada 5s
+    const interval = setInterval(checkInvites, 5000); 
     return () => clearInterval(interval);
   }, [currentUser, incomingInvite]);
 
-  // Persistência em cada mudança (Local Cache + Cloud Sync)
   useEffect(() => {
     if (isLoaded) {
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
-      
-      // Salva cache local SEMPRE que mudar (Safety Net)
       localStorage.setItem('minegen_projects', JSON.stringify(projects));
-
       if (currentUser) {
         localStorage.setItem('minegen_user', JSON.stringify(currentUser));
-        // Sync ativo de projetos modificados para a nuvem
-        if (activeProject) {
-          dbService.saveProject(activeProject);
-        }
+        if (activeProject) dbService.saveProject(activeProject);
       } else {
         localStorage.removeItem('minegen_user');
       }
     }
   }, [projects, currentUser, isLoaded, currentProjectId]);
 
+  // Carrega handle e verifica permissão
   useEffect(() => {
     const loadHandle = async () => {
       setDirectoryHandle(null);
+      setHasFilePermission(false);
+
       if (currentProjectId) {
         const saved = await getDirectoryHandleFromDB(currentProjectId);
-        if (saved) setDirectoryHandle(saved);
+        if (saved) {
+             setDirectoryHandle(saved);
+             // Verifica status da permissão (sem pedir prompt)
+             const status = await checkPermissionStatus(saved);
+             setHasFilePermission(status === 'granted');
+        }
       }
     };
     loadHandle();
   }, [currentProjectId]);
 
+  const handleReconnectFolder = async () => {
+      if (!directoryHandle) return;
+      try {
+          const granted = await verifyPermission(directoryHandle, true);
+          if (granted) {
+              setHasFilePermission(true);
+              playSound('success');
+              addLog("Sistema: Pasta reconectada com sucesso.");
+          }
+      } catch (e) {
+          addLog("Erro ao reconectar pasta.");
+      }
+  };
+
   const handleAuthSuccess = async (user: User) => {
     setCurrentUser(user);
-    
-    // Após login, carregar projetos dele da nuvem e mesclar
     setIsCloudSyncing(true);
     try {
         const cloudProjects = await dbService.loadUserProjects(user.id);
@@ -212,32 +205,26 @@ const App: React.FC = () => {
     }
     setIsCloudSyncing(false);
     setIsAuthModalOpen(false);
-    
     addLog(`Sistema: Bem-vindo, ${user.username}!`);
     playSound('success');
-    
-    // Verificar convite agora que logou
     checkInviteLink(user);
   };
 
   const handleDeleteAccount = async () => {
     if (!currentUser) return;
-    
     setIsCloudSyncing(true);
     const success = await dbService.deleteUser(currentUser.id);
     setIsCloudSyncing(false);
-
     if (success) {
       setCurrentUser(null);
       setProjects([]);
       setDirectoryHandle(null);
       setCurrentProjectId(null);
-      localStorage.clear(); // Limpa tudo para garantir
-      
-      addLog("Sistema: Conta excluída. Todos os dados locais e remotos foram removidos.");
+      localStorage.clear(); 
+      addLog("Sistema: Conta excluída.");
       playSound('message');
     } else {
-      addLog("Erro: Falha ao excluir conta. Tente novamente.");
+      addLog("Erro: Falha ao excluir conta.");
       playSound('error');
     }
   };
@@ -250,7 +237,6 @@ const App: React.FC = () => {
 
   const handleRespondInvite = async (accept: boolean) => {
     if (!incomingInvite) return;
-    
     setIsCloudSyncing(true);
     try {
       const project = await dbService.respondToInvite(incomingInvite.id, accept);
@@ -286,6 +272,7 @@ const App: React.FC = () => {
           });
           setCurrentProjectId(safeExisting.id);
           setDirectoryHandle(handle);
+          setHasFilePermission(true); // Acabamos de abrir, então temos permissão
           await saveDirectoryHandleToDB(safeExisting.id, handle);
       } else {
           const loaded = await readProjectFromDisk(handle);
@@ -304,6 +291,7 @@ const App: React.FC = () => {
           setProjects(prev => [newP, ...prev]);
           setCurrentProjectId(newId);
           setDirectoryHandle(handle);
+          setHasFilePermission(true);
           await saveDirectoryHandleToDB(newId, handle);
       }
     } catch (e: any) { addLog(`Erro: ${e.message}`); }
@@ -328,17 +316,14 @@ const App: React.FC = () => {
 
   if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace...</div>;
 
-  // LOGIN OBRIGATÓRIO: Se não houver currentUser, mostra AuthModal sem botão de fechar
   if (!currentUser) {
       return (
           <div className="h-[100dvh] w-full bg-[#1e1e1e] flex items-center justify-center relative overflow-hidden">
-             {/* Fundo Animado Simples */}
              <div className="absolute inset-0 bg-grid-animate opacity-20 pointer-events-none"></div>
              <div className="absolute inset-0 bg-radial-gradient pointer-events-none"></div>
-             
              <AuthModal 
                isOpen={true} 
-               onClose={() => {}} // No-op
+               onClose={() => {}}
                onAuthSuccess={handleAuthSuccess}
                canClose={false}
              />
@@ -348,17 +333,29 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
-      <div className="absolute top-4 right-4 z-50 flex items-center gap-2 pointer-events-none">
+      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+        {/* Aviso de Reconexão de Pasta */}
+        {directoryHandle && !hasFilePermission && (
+             <button 
+                onClick={handleReconnectFolder}
+                className="bg-yellow-500/10 border border-yellow-500/50 hover:bg-yellow-500/20 text-yellow-200 rounded-full px-3 py-1 text-[10px] font-bold flex items-center gap-2 animate-pulse shadow-[0_0_10px_rgba(234,179,8,0.2)] transition-all cursor-pointer pointer-events-auto"
+                title="Clique para autorizar a escrita de arquivos novamente"
+             >
+                <AlertTriangle className="w-3 h-3 text-yellow-500" />
+                Reconectar Pasta
+             </button>
+        )}
+
         {isCloudSyncing ? (
-          <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 animate-pulse">
+          <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 pointer-events-none">
             <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando...
           </div>
         ) : isBackendConnected ? (
-          <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2">
-            <Database className="w-3 h-3" /> Vercel Blob Conectado
+          <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2 pointer-events-none">
+            <Database className="w-3 h-3" /> Cloud Ativa
           </div>
         ) : (
-          <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2">
+          <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2 pointer-events-none">
             <CloudOff className="w-3 h-3" /> Modo Local
           </div>
         )}
@@ -417,7 +414,6 @@ const App: React.FC = () => {
         initialUser={currentUser}
       />
 
-      {/* MODAL DE CONVITE */}
       {incomingInvite && (
          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in p-4">
             <div className="bg-mc-panel border border-mc-accent w-full max-w-sm rounded-xl shadow-2xl overflow-hidden animate-slide-up">

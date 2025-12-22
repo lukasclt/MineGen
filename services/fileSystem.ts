@@ -47,7 +47,6 @@ export const getDirectoryHandleFromDB = async (projectId: string): Promise<any> 
 
 // --- Standard File System API ---
 
-// Adicionado .minegen para ser ignorado na leitura de código, mas usado para persistência
 const IGNORED_DIRS = new Set(['.git', 'target', 'build', '.idea', 'node_modules', '.gradle', 'bin', '.minegen']);
 const IGNORED_EXTENSIONS = new Set(['.jar', '.class', '.png', '.jpg', '.exe', '.dll', '.so', '.zip', '.gz']);
 
@@ -73,6 +72,12 @@ export const verifyPermission = async (fileHandle: any, readWrite: boolean = tru
   }
   
   return false;
+};
+
+// Nova função para checar sem pedir (útil para UI state)
+export const checkPermissionStatus = async (fileHandle: any): Promise<'granted' | 'prompt' | 'denied'> => {
+  if (!fileHandle) return 'denied';
+  return await fileHandle.queryPermission({ mode: 'readwrite' });
 };
 
 export const readProjectFromDisk = async (directoryHandle: any): Promise<GeneratedProject> => {
@@ -116,7 +121,6 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
 
   await readDirRecursive(directoryHandle, '');
   
-  // Sort files to put pom.xml and main classes first (better for AI context)
   files.sort((a, b) => {
     if (a.path === 'pom.xml' || a.path === 'build.gradle') return -1;
     if (b.path === 'pom.xml' || b.path === 'build.gradle') return 1;
@@ -134,14 +138,11 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
 export const detectProjectSettings = (files: GeneratedFile[]): Partial<PluginSettings> => {
     const settings: Partial<PluginSettings> = {};
 
-    // 1. Detect Build System and Metadata
     const pom = files.find(f => f.path.endsWith('pom.xml'));
     const gradle = files.find(f => f.path.endsWith('build.gradle') || f.path.endsWith('build.gradle.kts'));
 
     if (pom) {
         settings.buildSystem = BuildSystem.MAVEN;
-        
-        // Naive XML Parsing using regex
         const artifactIdMatch = pom.content.match(/<artifactId>(.*?)<\/artifactId>/);
         const groupIdMatch = pom.content.match(/<groupId>(.*?)<\/groupId>/);
         const javaVersionMatch = pom.content.match(/<java\.version>(.*?)<\/java\.version>/) || 
@@ -149,9 +150,8 @@ export const detectProjectSettings = (files: GeneratedFile[]): Partial<PluginSet
         
         if (artifactIdMatch) settings.name = artifactIdMatch[1];
         if (groupIdMatch) settings.groupId = groupIdMatch[1];
-        if (artifactIdMatch) settings.artifactId = artifactIdMatch[1]; // Typically same as name
+        if (artifactIdMatch) settings.artifactId = artifactIdMatch[1]; 
         
-        // Detect Java Version
         if (javaVersionMatch) {
             const ver = javaVersionMatch[1];
             if (ver.includes('1.8')) settings.javaVersion = JavaVersion.JAVA_8;
@@ -161,7 +161,6 @@ export const detectProjectSettings = (files: GeneratedFile[]): Partial<PluginSet
             else if (ver.includes('21')) settings.javaVersion = JavaVersion.JAVA_21;
         }
 
-        // Detect Platform based on dependencies
         if (pom.content.includes('io.papermc.paper')) settings.platform = Platform.PAPER;
         else if (pom.content.includes('org.spigotmc')) settings.platform = Platform.SPIGOT;
         else if (pom.content.includes('com.velocitypowered')) settings.platform = Platform.VELOCITY;
@@ -169,21 +168,16 @@ export const detectProjectSettings = (files: GeneratedFile[]): Partial<PluginSet
 
     } else if (gradle) {
         settings.buildSystem = BuildSystem.GRADLE;
-
-        // Naive Gradle Parsing
-        // Try to find rootProject.name inside settings.gradle if exists, else guess
         const settingsGradle = files.find(f => f.path.endsWith('settings.gradle'));
         if (settingsGradle) {
              const nameMatch = settingsGradle.content.match(/rootProject\.name\s*=\s*['"](.*?)['"]/);
              if (nameMatch) settings.name = nameMatch[1];
         }
 
-        // Detect Platform
         if (gradle.content.includes('io.papermc.paper') || gradle.content.includes('paper-api')) settings.platform = Platform.PAPER;
         else if (gradle.content.includes('org.spigotmc')) settings.platform = Platform.SPIGOT;
         else if (gradle.content.includes('com.velocitypowered')) settings.platform = Platform.VELOCITY;
         
-        // Detect Java
         if (gradle.content.includes('JavaLanguageVersion.of(17)')) settings.javaVersion = JavaVersion.JAVA_17;
         else if (gradle.content.includes('JavaLanguageVersion.of(21)')) settings.javaVersion = JavaVersion.JAVA_21;
         else if (gradle.content.includes('sourceCompatibility = 1.8') || gradle.content.includes('sourceCompatibility = \'1.8\'')) settings.javaVersion = JavaVersion.JAVA_8;
@@ -196,13 +190,20 @@ export const detectProjectSettings = (files: GeneratedFile[]): Partial<PluginSet
 export const saveFileToDisk = async (directoryHandle: any, path: string, content: string) => {
   if (!directoryHandle) throw new Error("Sem diretório vinculado.");
 
+  // CRÍTICO: Checagem rápida de permissão antes de tentar
+  // Se não tiver permissão, o 'createWritable' vai falhar, mas queremos um erro claro.
+  // Nota: Não podemos chamar 'requestPermission' aqui pois é async sem gesto do usuário.
+  const perm = await directoryHandle.queryPermission({ mode: 'readwrite' });
+  if (perm !== 'granted') {
+     throw new Error("Permissão de escrita negada. Clique em 'Reconectar Pasta' no topo.");
+  }
+
   const parts = path.split('/');
   const fileName = parts.pop();
   const directories = parts;
 
   let currentDirHandle = directoryHandle;
 
-  // Navigate or create directories recursively
   for (const dir of directories) {
     if (dir === '.' || dir === '') continue;
     currentDirHandle = await currentDirHandle.getDirectoryHandle(dir, { create: true });
@@ -224,13 +225,13 @@ export const saveProjectToDisk = async (directoryHandle: any, project: Generated
   }
 };
 
-// --- PERSISTÊNCIA DE ESTADO (.minegen/state.json) ---
-
 export const saveProjectStateToDisk = async (directoryHandle: any, projectData: SavedProject) => {
     if (!directoryHandle) return;
     
-    // Criar payload leve (sem generatedProject duplicado, se quisermos economizar, mas por segurança salvamos tudo menos o IDB handle)
-    // O ID deve ser preservado.
+    // Verifica permissão antes de tentar salvar estado
+    const perm = await directoryHandle.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') return; // Silenciosamente ignora se não tiver permissão
+
     const stateToSave = JSON.stringify(projectData, null, 2);
 
     try {
@@ -242,6 +243,9 @@ export const saveProjectStateToDisk = async (directoryHandle: any, projectData: 
 
 export const loadProjectStateFromDisk = async (directoryHandle: any): Promise<SavedProject | null> => {
     try {
+        const perm = await directoryHandle.queryPermission({ mode: 'read' });
+        if (perm !== 'granted') return null;
+
         const minegenDir = await directoryHandle.getDirectoryHandle('.minegen');
         const stateFile = await minegenDir.getFileHandle('state.json');
         const file = await stateFile.getFile();
@@ -249,7 +253,6 @@ export const loadProjectStateFromDisk = async (directoryHandle: any): Promise<Sa
         const data = JSON.parse(text) as SavedProject;
         return data;
     } catch (e) {
-        // Se não existir ou falhar, retorna null e o app fará auto-detection
         return null;
     }
 };
