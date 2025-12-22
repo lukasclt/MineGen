@@ -2,12 +2,14 @@
 import { Platform, JavaVersion, PluginSettings, BuildSystem } from './types';
 
 export const OPENROUTER_MODELS = [
-  { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash (Rápido)', provider: 'Google' },
-  { id: 'google/gemini-2.0-pro-exp-02-05:free', name: 'Gemini 2.0 Pro (Raciocínio)', provider: 'Google' },
-  { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'Anthropic' },
-  { id: 'alibaba/qwen-2.5-coder-32b-instruct', name: 'Qwen 2.5 Coder 32B', provider: 'Alibaba' },
-  { id: 'deepseek/deepseek-coder', name: 'DeepSeek Coder V2', provider: 'DeepSeek' },
-  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', provider: 'Meta' }
+  { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash (Recomendado)', provider: 'Google' },
+  { id: 'google/gemini-2.0-pro-exp-02-05:free', name: 'Gemini 2.0 Pro (Alta Precisão)', provider: 'Google' },
+  { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (Raciocínio Lógico)', provider: 'DeepSeek' },
+  { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B', provider: 'Meta' },
+  { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'Qwen 2.5 72B Coder', provider: 'Alibaba' },
+  { id: 'mistralai/mistral-7b-instruct:free', name: 'Mistral 7B', provider: 'Mistral' },
+  { id: 'microsoft/phi-3-medium-128k-instruct:free', name: 'Phi-3 Medium', provider: 'Microsoft' },
+  { id: 'google/learnlm-1.5-pro-experimental:free', name: 'LearnLM 1.5 Pro', provider: 'Google' }
 ];
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -21,7 +23,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   buildSystem: BuildSystem.MAVEN,
   description: "Um plugin legal gerado por IA.",
   author: "MineGenAI",
-  aiModel: 'google/gemini-2.0-flash-001', 
+  aiModel: 'google/gemini-2.0-flash-exp:free', 
   aiUrl: 'https://openrouter.ai/api/v1', 
   enableSounds: true,
   enableTTS: true 

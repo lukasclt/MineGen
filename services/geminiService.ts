@@ -81,7 +81,7 @@ ${prompt}
         'X-Title': 'MineGen AI Cloud',
       },
       body: JSON.stringify({
-        model: settings.aiModel || "google/gemini-2.0-flash-001",
+        model: settings.aiModel || "google/gemini-2.0-flash-exp:free",
         messages: [
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: contentArray }

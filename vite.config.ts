@@ -9,7 +9,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     base: '/',
     define: {
-      'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || "")
+      'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || ""),
+      'process.env.STORAGE_URL': JSON.stringify(env.STORAGE_URL || env.VITE_STORAGE_URL || "")
     },
     build: {
       outDir: 'dist',

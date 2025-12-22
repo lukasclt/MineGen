@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Menu, TerminalSquare } from 'lucide-react';
+import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -9,6 +9,7 @@ import AuthModal from './components/AuthModal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile, User } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk } from './services/fileSystem';
+import { dbService } from './services/dbService';
 import { playSound } from './services/audioService';
 
 const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
@@ -18,6 +19,7 @@ const App: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -30,32 +32,59 @@ const App: React.FC = () => {
 
   const addLog = (m: string) => setTerminalLogs(prev => [...prev, m]);
 
+  // Carregamento inicial (LocalStorage + Tentativa de Cloud)
   useEffect(() => {
-    try {
-      const savedUser = localStorage.getItem('minegen_user');
-      if (savedUser) setCurrentUser(JSON.parse(savedUser));
-      
-      const savedProjectsStr = localStorage.getItem('minegen_projects');
-      const savedLastId = localStorage.getItem('minegen_last_project_id');
-      if (savedProjectsStr) {
-        const parsed: SavedProject[] = JSON.parse(savedProjectsStr);
-        setProjects(parsed);
-        if (savedLastId && parsed.some(p => p.id === savedLastId)) setCurrentProjectId(savedLastId);
-        else if (parsed.length > 0) setCurrentProjectId(parsed[0].id);
-      } 
-    } catch (e) { console.error(e); } finally { setIsLoaded(true); }
+    const init = async () => {
+      try {
+        const savedUser = localStorage.getItem('minegen_user');
+        if (savedUser) {
+          const user = JSON.parse(savedUser);
+          setCurrentUser(user);
+          
+          // Se houver STORAGE_URL, tentamos sincronizar projetos da nuvem
+          setIsCloudSyncing(true);
+          const cloudProjects = await dbService.loadUserProjects(user.id);
+          if (cloudProjects.length > 0) {
+            setProjects(cloudProjects);
+            addLog("Sistema: Projetos sincronizados com a nuvem.");
+          } else {
+            const savedProjectsStr = localStorage.getItem('minegen_projects');
+            if (savedProjectsStr) setProjects(JSON.parse(savedProjectsStr));
+          }
+          setIsCloudSyncing(false);
+        } else {
+          const savedProjectsStr = localStorage.getItem('minegen_projects');
+          if (savedProjectsStr) setProjects(JSON.parse(savedProjectsStr));
+        }
+
+        const savedLastId = localStorage.getItem('minegen_last_project_id');
+        if (savedLastId) setCurrentProjectId(savedLastId);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+    init();
   }, []);
 
+  // Persistência em cada mudança (Cloud Sync)
   useEffect(() => {
     if (isLoaded) {
       localStorage.setItem('minegen_projects', JSON.stringify(projects));
+      if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
+      
       if (currentUser) {
         localStorage.setItem('minegen_user', JSON.stringify(currentUser));
+        // Sync ativo de projetos modificados para a nuvem
+        if (activeProject) {
+          dbService.saveProject(activeProject);
+        }
       } else {
         localStorage.removeItem('minegen_user');
       }
     }
-  }, [projects, currentUser, isLoaded]);
+  }, [projects, currentUser, isLoaded, currentProjectId]);
 
   useEffect(() => {
     const loadHandle = async () => {
@@ -67,6 +96,21 @@ const App: React.FC = () => {
     };
     loadHandle();
   }, [currentProjectId]);
+
+  const handleAuthSuccess = async (user: User) => {
+    setIsCloudSyncing(true);
+    const syncedUser = await dbService.syncUser(user);
+    setCurrentUser(syncedUser);
+    
+    // Após login, carregar projetos dele
+    const cloudProjects = await dbService.loadUserProjects(syncedUser.id);
+    if (cloudProjects.length > 0) {
+      setProjects(cloudProjects);
+    }
+    setIsCloudSyncing(false);
+    setIsAuthModalOpen(false);
+    addLog(`Sistema: Bem-vindo de volta, ${syncedUser.username}!`);
+  };
 
   const handleInvite = (email: string) => {
     if (!activeProject) return;
@@ -121,15 +165,38 @@ const App: React.FC = () => {
     setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, generatedProject: { ...generated, files: merged }, lastModified: Date.now() } : p));
   };
 
+  const handleDeleteProject = async (id: string) => {
+    setProjects(p => p.filter(x => x.id !== id));
+    if (currentUser) {
+      await dbService.deleteProject(id);
+    }
+  };
+
   if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace Cloud...</div>;
 
   return (
     <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans">
+      <div className="absolute top-4 right-4 z-50 flex items-center gap-2 pointer-events-none">
+        {isCloudSyncing ? (
+          <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 animate-pulse">
+            <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando nuvem...
+          </div>
+        ) : (process.env as any).STORAGE_URL ? (
+          <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2">
+            <Cloud className="w-3 h-3" /> MongoDB Conectado
+          </div>
+        ) : (
+          <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2">
+            <CloudOff className="w-3 h-3" /> Modo Local
+          </div>
+        )}
+      </div>
+
       <Sidebar 
         isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         projects={projects} currentProjectId={currentProjectId}
         onSelectProject={setCurrentProjectId} onCreateProject={handleOpenOrNewProject}
-        onDeleteProject={id => setProjects(p => p.filter(x => x.id !== id))}
+        onDeleteProject={handleDeleteProject}
         settings={activeProject?.settings || DEFAULT_SETTINGS} 
         setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, settings: typeof newS === 'function' ? newS(p.settings) : newS } : p))}
         currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
@@ -149,9 +216,12 @@ const App: React.FC = () => {
             />
           ) : (
              <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">
-                <Menu className="w-12 h-12 opacity-10" />
-                <h2 className="text-lg font-medium text-[#cccccc]">Acesse um Projeto</h2>
-                <button onClick={handleOpenOrNewProject} className="bg-[#007acc] text-white px-6 py-2 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold">Importar do Disco</button>
+                <div className="w-20 h-20 rounded-full bg-gray-800/50 flex items-center justify-center mb-4">
+                   <TerminalSquare className="w-10 h-10 opacity-20" />
+                </div>
+                <h2 className="text-lg font-medium text-[#cccccc]">Bem-vindo ao MineGen Workspace</h2>
+                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no { (process.env as any).STORAGE_URL ? 'MongoDB Atlas' : 'LocalStorage' }.</p>
+                <button onClick={handleOpenOrNewProject} className="bg-mc-accent text-white px-8 py-2.5 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold transition-all">Importar / Novo Projeto</button>
              </div>
           )}
         </div>
@@ -170,7 +240,7 @@ const App: React.FC = () => {
       <AuthModal 
         isOpen={isAuthModalOpen} 
         onClose={() => setIsAuthModalOpen(false)} 
-        onAuthSuccess={setCurrentUser} 
+        onAuthSuccess={handleAuthSuccess} 
         initialUser={currentUser}
       />
     </div>
