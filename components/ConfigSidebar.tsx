@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, SavedProject, BuildSystem, User } from '../types';
 import { MC_VERSIONS, OPENROUTER_MODELS } from '../constants';
-import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket, Users, UserPlus, Shield, LogOut, ChevronRight, Settings2, UserX, Loader2, AlertCircle, Link, Check, Copy } from 'lucide-react';
+import { Database, Coffee, Tag, Cpu, Download, MessageSquare, Plus, Trash2, Sliders, Box, Volume2, Mic, FolderOpen, Globe, Key, Zap, Rocket, Users, UserPlus, Shield, LogOut, ChevronRight, Settings2, UserX, Loader2, AlertCircle, Link, Check, Copy, Wrench, Layers } from 'lucide-react';
 import { dbService } from '../services/dbService';
 import { playSound } from '../services/audioService';
 
@@ -281,13 +281,13 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                <div className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-200 p-3 rounded text-[10px] mb-2">Selecione um projeto para editar as configurações.</div>
             )}
             
+            {/* AI Model Section */}
             <div className="space-y-4 bg-gray-800/50 p-3 rounded-lg border border-gray-700">
                <label className="text-xs font-bold text-mc-gold uppercase tracking-wider flex items-center gap-1"><Cpu className="w-3.5 h-3.5" /> IA (OpenRouter)</label>
-               
                <div>
                   <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Modelo de Inteligência</span>
                   <select 
-                    value={settings.aiModel || 'google/gemini-2.0-flash-001'} 
+                    value={settings.aiModel || 'google/gemini-2.0-flash-exp:free'} 
                     onChange={(e) => handleChange('aiModel', e.target.value)} 
                     disabled={isConfigDisabled} 
                     className="w-full bg-gray-900 border border-gray-600 rounded p-2 text-xs text-mc-green font-mono outline-none cursor-pointer hover:border-mc-gold transition-colors"
@@ -297,15 +297,15 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                     ))}
                   </select>
                </div>
-
                <div className="text-[9px] text-gray-400 bg-black/40 p-2 rounded border border-gray-800 leading-relaxed">
                   <Rocket className="w-2.5 h-2.5 inline mr-1 text-mc-gold" />
-                  <strong>Dica:</strong> Modelos "Pro" ou "Sonnet" são melhores para lógica complexa. Modelos "Flash" são mais rápidos e baratos.
+                  <strong>Dica:</strong> Modelos "Pro" ou "Sonnet" são melhores para lógica complexa.
                </div>
             </div>
 
+            {/* Identidade */}
             <div className="space-y-3">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1"><Tag className="w-3.5 h-3.5" /> Identidade do Plugin</label>
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1"><Tag className="w-3.5 h-3.5" /> Identidade</label>
               <input type="text" value={settings.name || ''} onChange={(e) => handleChange('name', e.target.value)} disabled={isConfigDisabled} className="w-full bg-gray-900 border border-gray-700 rounded p-2.5 text-sm text-white outline-none focus:border-mc-accent" placeholder="Nome do Plugin" />
               <div className="grid grid-cols-2 gap-2">
                 <input type="text" value={settings.groupId || ''} onChange={(e) => handleChange('groupId', e.target.value)} disabled={isConfigDisabled} className="w-full bg-gray-900 border border-gray-700 rounded p-2.5 text-xs text-white outline-none" placeholder="groupId" />
@@ -313,8 +313,9 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
               </div>
             </div>
             
+            {/* Plataforma */}
             <div className="space-y-3">
-              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1"><Rocket className="w-3.5 h-3.5" /> Plataforma</label>
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1"><Layers className="w-3.5 h-3.5" /> Plataforma</label>
               <select 
                 value={settings.platform} 
                 onChange={(e) => handleChange('platform', e.target.value)} 
@@ -324,6 +325,53 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                 {Object.values(Platform).map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
+
+            {/* Configuração de Build & Ambiente */}
+            <div className="space-y-4 pt-4 border-t border-gray-700">
+               <label className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1"><Wrench className="w-3.5 h-3.5" /> Ambiente & Build</label>
+               
+               {/* Build System */}
+               <div>
+                  <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Sistema de Build</span>
+                  <select 
+                    value={settings.buildSystem} 
+                    onChange={(e) => handleChange('buildSystem', e.target.value)} 
+                    disabled={isConfigDisabled}
+                    className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
+                  >
+                    {Object.values(BuildSystem).map(bs => <option key={bs} value={bs}>{bs}</option>)}
+                  </select>
+               </div>
+
+               <div className="grid grid-cols-2 gap-2">
+                 {/* Minecraft Version */}
+                 <div>
+                    <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Minecraft</span>
+                    <select 
+                      value={settings.mcVersion} 
+                      onChange={(e) => handleChange('mcVersion', e.target.value)} 
+                      disabled={isConfigDisabled}
+                      className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
+                    >
+                      {MC_VERSIONS.map(ver => <option key={ver} value={ver}>{ver}</option>)}
+                    </select>
+                 </div>
+
+                 {/* Java Version */}
+                 <div>
+                    <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Java</span>
+                    <select 
+                      value={settings.javaVersion} 
+                      onChange={(e) => handleChange('javaVersion', e.target.value)} 
+                      disabled={isConfigDisabled}
+                      className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
+                    >
+                      {Object.values(JavaVersion).map(jv => <option key={jv} value={jv}>Java {jv}</option>)}
+                    </select>
+                 </div>
+               </div>
+            </div>
+
           </div>
         )}
       </div>
@@ -332,7 +380,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
         {showInstallButton && onInstall && (
           <button onClick={onInstall} className="w-full bg-mc-green/20 hover:bg-mc-green/30 text-mc-green border border-mc-green/50 rounded-lg py-2 px-3 text-sm font-semibold flex items-center justify-center gap-2 transition-all animate-pulse"><Download className="w-4 h-4" /> Instalar App</button>
         )}
-        <p className="text-[10px] text-gray-600 text-center font-mono">MineGen OpenRouter v4.1</p>
+        <p className="text-[10px] text-gray-600 text-center font-mono">MineGen OpenRouter v4.2</p>
       </div>
     </div>
   );

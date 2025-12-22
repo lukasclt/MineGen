@@ -161,8 +161,12 @@ ${prompt}
     }
 
     // Injetar wrappers se necessário
-    if (settings.buildSystem === BuildSystem.GRADLE && !previousProject) {
-        if (!project.files.some(f => f.path.includes('gradlew'))) {
+    // Alterado para funcionar mesmo se previousProject existir, caso o usuário troque para Gradle no meio do projeto
+    if (settings.buildSystem === BuildSystem.GRADLE) {
+        const hasWrapper = project.files.some(f => f.path.includes('gradlew')) || 
+                          (previousProject?.files.some(f => f.path.includes('gradlew')));
+        
+        if (!hasWrapper) {
             project.files.push(
                 { path: 'gradlew', content: GRADLEW_UNIX, language: 'text' },
                 { path: 'gradlew.bat', content: GRADLEW_BAT, language: 'text' },
