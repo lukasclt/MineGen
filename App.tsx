@@ -82,7 +82,11 @@ const App: React.FC = () => {
     if (cloudProjects.length > 0) {
       setProjects(prevLocal => {
         const merged = [...prevLocal];
-        const sanitizedCloud = cloudProjects.map(p => ({...p, members: p.members || []}));
+        const sanitizedCloud = cloudProjects.map(p => ({
+            ...p, 
+            members: p.members || [],
+            ownerName: p.ownerName || 'Desconhecido' 
+        }));
 
         sanitizedCloud.forEach(cloudP => {
           const localIdx = merged.findIndex(p => p.id === cloudP.id);
@@ -91,15 +95,16 @@ const App: React.FC = () => {
           } else {
             const localP = merged[localIdx];
             
-            // Lógica de Merge:
-            // 1. Se o projeto da nuvem foi modificado depois, ele ganha.
-            // 2. Se o projeto da nuvem tem mais mensagens (ex: alguém falou algo), ele ganha.
-            // 3. Se o projeto da nuvem tem uma mensagem com status diferente (ex: mudou de 'processing' para 'done'), ele ganha.
-            
+            // Lógica de Merge Aprimorada:
+            // Sincroniza se o cloud for mais novo, se tiver mais mensagens OU se a lista de membros for diferente
             const cloudMessagesHash = JSON.stringify(cloudP.messages.map(m => m.status + m.id));
             const localMessagesHash = JSON.stringify(localP.messages.map(m => m.status + m.id));
-            
-            if (cloudP.lastModified > localP.lastModified || cloudMessagesHash !== localMessagesHash) {
+            const cloudMembersHash = JSON.stringify(cloudP.members.sort());
+            const localMembersHash = JSON.stringify(localP.members.sort());
+
+            if (cloudP.lastModified > localP.lastModified || 
+                cloudMessagesHash !== localMessagesHash ||
+                cloudMembersHash !== localMembersHash) {
                merged[localIdx] = cloudP;
             }
           }
@@ -138,7 +143,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
     
-    // Intervalo de sync mais rápido se tiver projeto aberto (para ver animação)
+    // Intervalo de sync mais rápido se tiver projeto aberto (para ver animação e membros entrando)
     const syncIntervalTime = currentProjectId ? 2000 : 8000; 
 
     const syncLoop = async () => {
@@ -289,10 +294,13 @@ const App: React.FC = () => {
           const loaded = await readProjectFromDisk(handle);
           const detected = detectProjectSettings(loaded.files);
           const newId = generateUUID();
+          
+          // CRÍTICO: Definindo ownerName na criação
           const newP: SavedProject = {
             id: newId,
             name: detected.name || handle.name,
             ownerId: currentUser?.id || 'guest',
+            ownerName: currentUser?.username || 'Convidado', // Correção do Dono
             members: [],
             lastModified: Date.now(),
             settings: { ...DEFAULT_SETTINGS, name: detected.name || handle.name, ...detected },

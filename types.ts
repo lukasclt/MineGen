@@ -77,6 +77,7 @@ export interface SavedProject {
   id: string;
   name: string;
   ownerId: string;
+  ownerName?: string; // Adicionado para exibir o nome do dono
   members: string[];
   lastModified: number;
   settings: PluginSettings;

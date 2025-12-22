@@ -243,14 +243,18 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
 
             <div className="space-y-3">
                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1">
-                 Participantes ({(activeProject?.members || []).length})
+                 Participantes ({(activeProject?.members || []).length + 1})
                </label>
                {activeProject ? (
                  <div className="space-y-2">
                     <div className="flex items-center gap-3 p-2.5 bg-mc-accent/10 border border-mc-accent/20 rounded-lg">
-                       <div className="w-8 h-8 rounded-full bg-mc-accent flex items-center justify-center text-[10px] font-bold text-white">Owner</div>
+                       <div className="w-8 h-8 rounded-full bg-mc-accent flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                           {(activeProject.ownerName || 'O')[0]}
+                       </div>
                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold text-white">Dono do Projeto</p>
+                          <p className="text-xs font-bold text-white">
+                            {activeProject.ownerName || 'Dono do Projeto'}
+                          </p>
                           <p className="text-[9px] text-mc-accent uppercase">Administrador</p>
                        </div>
                        <Shield className="w-3.5 h-3.5 text-mc-gold" />
@@ -297,10 +301,6 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                     ))}
                   </select>
                </div>
-               <div className="text-[9px] text-gray-400 bg-black/40 p-2 rounded border border-gray-800 leading-relaxed">
-                  <Rocket className="w-2.5 h-2.5 inline mr-1 text-mc-gold" />
-                  <strong>Dica:</strong> Modelos "Pro" ou "Sonnet" são melhores para lógica complexa.
-               </div>
             </div>
 
             {/* Identidade */}
@@ -346,41 +346,44 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                <div className="grid grid-cols-2 gap-2">
                  {/* Minecraft Version */}
                  <div>
-                    <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Minecraft</span>
+                    <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Versão Minecraft</span>
                     <select 
-                      value={settings.mcVersion} 
-                      onChange={(e) => handleChange('mcVersion', e.target.value)} 
-                      disabled={isConfigDisabled}
-                      className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
+                        value={settings.mcVersion} 
+                        onChange={(e) => handleChange('mcVersion', e.target.value)} 
+                        disabled={isConfigDisabled}
+                        className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
                     >
-                      {MC_VERSIONS.map(ver => <option key={ver} value={ver}>{ver}</option>)}
+                        {MC_VERSIONS.map(v => <option key={v} value={v}>{v}</option>)}
                     </select>
                  </div>
-
+                 
                  {/* Java Version */}
                  <div>
-                    <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Java</span>
+                    <span className="text-[10px] text-gray-500 mb-1 block uppercase font-bold">Versão Java</span>
                     <select 
-                      value={settings.javaVersion} 
-                      onChange={(e) => handleChange('javaVersion', e.target.value)} 
-                      disabled={isConfigDisabled}
-                      className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
+                        value={settings.javaVersion} 
+                        onChange={(e) => handleChange('javaVersion', e.target.value)} 
+                        disabled={isConfigDisabled}
+                        className="w-full bg-gray-900 border border-gray-700 rounded p-2 text-xs text-white outline-none cursor-pointer"
                     >
-                      {Object.values(JavaVersion).map(jv => <option key={jv} value={jv}>Java {jv}</option>)}
+                        {Object.values(JavaVersion).map(jv => <option key={jv} value={jv}>Java {jv}</option>)}
                     </select>
                  </div>
                </div>
             </div>
 
+            <div className="pt-4 flex items-center justify-between text-[10px] text-gray-500">
+               <span>Sound FX</span>
+               <button 
+                onClick={() => handleChange('enableSounds', !settings.enableSounds)}
+                disabled={isConfigDisabled}
+                className={`w-8 h-4 rounded-full relative transition-colors ${settings.enableSounds ? 'bg-mc-green' : 'bg-gray-700'}`}
+               >
+                 <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${settings.enableSounds ? 'left-4.5' : 'left-0.5'}`}></div>
+               </button>
+            </div>
           </div>
         )}
-      </div>
-
-      <div className="p-4 border-t border-gray-700 flex flex-col gap-3">
-        {showInstallButton && onInstall && (
-          <button onClick={onInstall} className="w-full bg-mc-green/20 hover:bg-mc-green/30 text-mc-green border border-mc-green/50 rounded-lg py-2 px-3 text-sm font-semibold flex items-center justify-center gap-2 transition-all animate-pulse"><Download className="w-4 h-4" /> Instalar App</button>
-        )}
-        <p className="text-[10px] text-gray-600 text-center font-mono">MineGen OpenRouter v4.2</p>
       </div>
     </div>
   );
