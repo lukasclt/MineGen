@@ -1,9 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from '../types';
+import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User, SavedProject } from '../types';
 import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive, Timer } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
-import { saveProjectToDisk, readProjectFromDisk } from '../services/fileSystem';
+import { saveProjectToDisk, readProjectFromDisk, saveProjectStateToDisk } from '../services/fileSystem';
 import { playSound, stopSpeech } from '../services/audioService';
 
 interface ChatInterfaceProps {
@@ -11,6 +11,7 @@ interface ChatInterfaceProps {
   messages: ChatMessage[];
   setMessages: (msgs: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   currentProject: GeneratedProject | null;
+  fullProject: SavedProject | null; // Adicionado para acesso ao objeto completo para salvamento
   onProjectGenerated: (project: any) => void;
   directoryHandle: any;
   onSetDirectoryHandle: (handle: any) => void;
@@ -20,24 +21,27 @@ interface ChatInterfaceProps {
 }
 
 const REASONING_STEPS = [
-  "Conectando ao modelo...",
-  "Lendo estrutura do projeto...",
-  "Analisando requisitos (Spigot/Paper/Velocity)...",
-  "Gerando lógica Java...",
-  "Escrevendo classes & Config...",
-  "Validando sintaxe...",
-  "Finalizando..."
+  "Conectando ao modelo...",           // 0 - 15%
+  "Lendo estrutura do projeto...",     // 15 - 30%
+  "Analisando requisitos...",          // 30 - 50%
+  "Gerando lógica Java...",            // 50 - 70%
+  "Escrevendo classes & Config...",    // 70 - 85%
+  "Validando sintaxe...",              // 85 - 95% (PAUSA AQUI)
+  "Finalizando e Salvando..."          // 98 - 100%
 ];
 
 const TIMEOUT_DURATION = 300; // 5 minutos em segundos
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
-  settings, messages, setMessages, currentProject, onProjectGenerated, 
+  settings, messages, setMessages, currentProject, fullProject, onProjectGenerated, 
   directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser
 }) => {
   const [input, setInput] = useState('');
   const [isLocalProcessing, setIsLocalProcessing] = useState(false);
-  const [reasoningStep, setReasoningStep] = useState(0);
+  
+  // Substitui reasoningStep simples por um valor percentual preciso
+  const [progressValue, setProgressValue] = useState(0);
+  
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [queue, setQueue] = useState<{id: string, text: string, att: Attachment[]}[]>([]);
   const [timeLeft, setTimeLeft] = useState(TIMEOUT_DURATION);
@@ -51,23 +55,49 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, reasoningStep, processingMessage]);
+  }, [messages, progressValue, processingMessage]);
 
-  // Ciclo de animação dos passos (Simulado localmente para quem vê)
+  // --- PROGRESSO VISUAL ORGÂNICO ---
   useEffect(() => {
     let interval: any;
+    
     if (processingMessage) {
         interval = setInterval(() => {
-            setReasoningStep(prev => {
-                if (prev < REASONING_STEPS.length - 1) return prev + 1;
-                return prev;
+            setProgressValue(prev => {
+                // Se já passou de 95 (definido manualmente quando a resposta chega), não mexe
+                if (prev >= 95) return prev;
+                
+                // Incremento variável para parecer "pensamento"
+                // Desacelera conforme chega perto de 95%
+                let increment = 0;
+                if (prev < 30) increment = 2; // Rápido no início
+                else if (prev < 60) increment = 1; // Médio
+                else if (prev < 80) increment = 0.5; // Mais lento
+                else if (prev < 95) increment = 0.2; // Muito lento esperando a API
+
+                const next = prev + increment;
+                return next >= 95 ? 95 : next; // Trava em 95% até a API responder
             });
-        }, 1200);
+        }, 300);
     } else {
-        setReasoningStep(0);
+        // Se não está processando e não acabou de terminar (para não piscar 0 antes de sumir)
+        if (!isLocalProcessing) {
+            setProgressValue(0);
+        }
     }
     return () => clearInterval(interval);
-  }, [processingMessage]); 
+  }, [processingMessage, isLocalProcessing]); 
+
+  // Calcula qual texto mostrar baseado na porcentagem atual
+  const getCurrentStepText = (pct: number) => {
+      if (pct < 15) return REASONING_STEPS[0];
+      if (pct < 30) return REASONING_STEPS[1];
+      if (pct < 50) return REASONING_STEPS[2];
+      if (pct < 70) return REASONING_STEPS[3];
+      if (pct < 85) return REASONING_STEPS[4];
+      if (pct < 98) return REASONING_STEPS[5]; // Validando sintaxe... (Fica aqui nos 95%)
+      return REASONING_STEPS[6]; // Finalizando (98%+)
+  };
 
   // --- TIMER E TIMEOUT LOGIC ---
   useEffect(() => {
@@ -118,9 +148,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   }, [queue, isLocalProcessing]);
 
   const executeAiGeneration = async (text: string, currentAttachments: Attachment[], isRetry = false, reuseMsgId?: string) => {
-    if (!isRetry) setIsLocalProcessing(true);
+    if (!isRetry) {
+        setIsLocalProcessing(true);
+        setProgressValue(0); // Reset visual
+    }
     
-    setReasoningStep(0);
     setTimeLeft(TIMEOUT_DURATION); // Reseta o timer visual e lógico
     
     // Cria novo controlador para esta tentativa
@@ -141,9 +173,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }
         ]);
     } else {
-        // Se for retry, podemos atualizar a mensagem para dizer "Retentando..." se quisermos, 
-        // mas o usuário pediu loop transparente. Vamos manter o status 'processing'.
-        // Opcional: Adicionar log no console
         console.log(`[Auto-Retry] Reiniciando tentativa de geração...`);
     }
 
@@ -157,8 +186,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           abortControllerRef.current.signal // Passa o sinal
       );
       
-      // Atualiza o projeto no estado global IMEDIATAMENTE
+      // --- CHEGOU A RESPOSTA (O fetch passou) ---
+      // Pula para 98% para indicar "Processando arquivos..."
+      setProgressValue(98);
+
+      // Atualiza o projeto no estado global
       onProjectGenerated(project);
+
+      // Pequeno delay para usuário ver o "Finalizando..."
+      await new Promise(r => setTimeout(r, 600));
+
+      // 3. SALVAMENTO NO DISCO
+      if (directoryHandle) {
+          await saveProjectToDisk(directoryHandle, project)
+             .then(() => console.log("Projeto salvo no disco com sucesso."))
+             .catch(e => console.warn("Erro ao salvar no disco (background):", e));
+      }
+
+      // Finaliza 100%
+      setProgressValue(100);
 
       // 2. ATUALIZA PARA 'DONE' COM O RESULTADO
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
@@ -169,14 +215,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       } : m));
 
       if (settings.enableSounds) playSound('success');
-      
-      // 3. SALVAMENTO NO DISCO
-      if (directoryHandle) {
-          saveProjectToDisk(directoryHandle, project)
-             .then(() => console.log("Projeto salvo no disco com sucesso."))
-             .catch(e => console.warn("Erro ao salvar no disco (background):", e));
-      }
-      
       setIsLocalProcessing(false);
 
     } catch (error: any) {
@@ -184,7 +222,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (error.message === 'TIMEOUT' || error.name === 'AbortError') {
           // Não define status como done, não para o processamento.
           // Chama recursivamente a função.
-          // Pequeno delay para evitar stack overflow imediato em caso de erros síncronos bizarros
           setTimeout(() => {
               executeAiGeneration(text, currentAttachments, true, modelMsgId);
           }, 1000);
@@ -219,16 +256,34 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setAttachments([]);
   };
 
-  const handleClearChat = () => {
-    if (window.confirm("Tem certeza que deseja limpar todo o histórico de conversas deste projeto?")) {
+  const handleClearChat = async () => {
+    if (window.confirm("Tem certeza que deseja limpar todo o histórico de conversas deste projeto? Isso afetará o arquivo .minegen.")) {
+        // 1. Atualiza visualmente (React State)
         setMessages([]);
         playSound('click');
+
+        // 2. Atualiza fisicamente (.minegen/state.json) se houver handle e projeto
+        if (directoryHandle && fullProject) {
+            try {
+                const updatedProject: SavedProject = {
+                    ...fullProject,
+                    messages: [],
+                    lastModified: Date.now()
+                };
+                await saveProjectStateToDisk(directoryHandle, updatedProject);
+                console.log("Histórico limpo e sincronizado com .minegen/state.json");
+            } catch (e) {
+                console.error("Erro ao salvar limpeza no disco:", e);
+            }
+        }
     }
   };
 
   const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
-  const progressPercent = Math.min(100, Math.round(((reasoningStep + 1) / REASONING_STEPS.length) * 100));
+  // Arredonda para exibição (ex: 95.333 -> 95)
+  const displayPercent = Math.min(100, Math.floor(progressValue));
+  const currentStepText = getCurrentStepText(displayPercent);
 
   // Helper para formatar tempo mm:ss
   const formatTime = (seconds: number) => {
@@ -244,7 +299,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <button 
              onClick={handleClearChat}
              className="absolute top-2 right-4 z-10 p-1.5 bg-[#252526] hover:bg-red-900/40 text-gray-500 hover:text-red-400 rounded-md border border-[#333] hover:border-red-500/30 transition-all shadow-lg"
-             title="Limpar Histórico"
+             title="Limpar Histórico e Salvar no .minegen"
           >
              <Trash2 className="w-4 h-4" />
           </button>
@@ -270,19 +325,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                         <div className="flex items-center justify-between mb-2">
                            <span className="text-xs font-bold text-mc-accent flex items-center gap-2">
                              <Loader2 className="w-3 h-3 animate-spin" /> 
-                             {progressPercent >= 100 ? "Finalizando..." : `Gerando... ${progressPercent}%`}
+                             {displayPercent >= 100 ? "Concluído" : `Gerando... ${displayPercent}%`}
                            </span>
-                           <span className="text-[10px] text-gray-500">{REASONING_STEPS[reasoningStep]}</span>
+                           <span className="text-[10px] text-gray-500">{currentStepText}</span>
                         </div>
                         <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden mb-2">
                            <div 
-                             className="h-full bg-mc-accent transition-all duration-500 ease-out"
-                             style={{ width: `${progressPercent}%` }}
+                             className="h-full bg-mc-accent transition-all duration-300 ease-linear"
+                             style={{ width: `${displayPercent}%` }}
                            ></div>
                         </div>
                         {/* TIMER DISPLAY - Oculta quando está em 100% para não confundir */}
                         <div className="flex items-center justify-end gap-1.5 text-[10px] text-gray-400 font-mono bg-black/20 py-1 px-2 rounded">
-                            {progressPercent >= 100 ? (
+                            {displayPercent >= 100 ? (
                                 <span className="text-mc-green flex items-center gap-1">
                                    <CheckCircle2 className="w-3 h-3" /> Processamento Concluído
                                 </span>

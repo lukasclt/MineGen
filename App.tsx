@@ -493,7 +493,9 @@ const App: React.FC = () => {
                   messages: typeof upd === 'function' ? upd(p.messages) : upd,
                   lastModified: Date.now() 
               } : p))}
-              currentProject={activeProject.generatedProject} onProjectGenerated={handleProjectGenerated}
+              currentProject={activeProject.generatedProject} 
+              fullProject={activeProject} // PASSADO PARA PERMITIR SALVAMENTO DO HISTÓRICO NO DISCO
+              onProjectGenerated={handleProjectGenerated}
               directoryHandle={directoryHandle} onSetDirectoryHandle={setDirectoryHandle}
               pendingMessage={pendingAiMessage} onClearPendingMessage={() => setPendingAiMessage(null)}
               currentUser={currentUser}
