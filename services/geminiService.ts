@@ -46,7 +46,8 @@ export const generatePluginCode = async (
   settings: PluginSettings,
   previousProject?: GeneratedProject | null,
   attachments: Attachment[] = [],
-  currentUser?: User | null
+  currentUser?: User | null,
+  signal?: AbortSignal // Adicionado suporte a sinal de cancelamento
 ): Promise<GeneratedProject> => {
   
   const baseUrl = 'https://openrouter.ai/api/v1';
@@ -150,6 +151,7 @@ ${prompt}
         temperature: 0.2, // Baixa temperatura para código preciso
         max_tokens: 8192, // Permitir respostas longas para projetos complexos
       }),
+      signal: signal // Passa o sinal para o fetch
     });
 
     if (!response.ok) {
@@ -195,6 +197,9 @@ ${prompt}
 
     return project;
   } catch (e: any) {
+    if (e.name === 'AbortError') {
+        throw new Error("TIMEOUT");
+    }
     console.error("AI Generation Error Completo:", e);
     throw new Error(e.message || "Falha na comunicação com OpenRouter.");
   }

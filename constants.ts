@@ -75,7 +75,9 @@ Structure:
 3. **Configuration**: Always generate a robust 'config.yml' if values need to be configurable.
 4. **Dependency Management**:
    - Always provide the correct 'pom.xml' or 'build.gradle' file with necessary repositories (Papermc, SpigotMC, Sonatype) and dependencies.
-   - Ensure the 'maven-shade-plugin' or 'shadowJar' is configured if external libraries are used.
+   - **Maven**: Use 'maven-shade-plugin' to package the jar.
+   - **Gradle**: You MUST apply the 'com.github.johnrengelman.shadow' plugin (version 8.0.0+ or compatible).
+   - **Gradle**: Explicitly configure \`tasks.build.dependsOn(tasks.shadowJar)\` to ensure the fat jar is generated in \`build/libs\` when running build.
 5. **No Placeholders**: Never write "// code here". Implement the full logic requested.
 
 # ERROR HANDLING

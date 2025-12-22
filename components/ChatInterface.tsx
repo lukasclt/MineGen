@@ -1,7 +1,6 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User } from '../types';
-import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Cpu, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Image as ImageIcon, Paperclip, X, RefreshCw, Lock, Volume2, StopCircle, Clock, Hourglass, Shield, HardDrive, Timer } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { saveProjectToDisk, readProjectFromDisk } from '../services/fileSystem';
 import { playSound, stopSpeech } from '../services/audioService';
@@ -29,6 +28,8 @@ const REASONING_STEPS = [
   "Finalizando..."
 ];
 
+const TIMEOUT_DURATION = 300; // 5 minutos em segundos
+
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   settings, messages, setMessages, currentProject, onProjectGenerated, 
   directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser
@@ -38,9 +39,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [reasoningStep, setReasoningStep] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [queue, setQueue] = useState<{id: string, text: string, att: Attachment[]}[]>([]);
+  const [timeLeft, setTimeLeft] = useState(TIMEOUT_DURATION);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // CRÍTICO: Detecta se há alguma mensagem com status 'processing' no array de mensagens sincronizado.
   const processingMessage = messages.find(m => m.status === 'processing' && m.role === 'model');
@@ -65,6 +68,31 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return () => clearInterval(interval);
   }, [processingMessage]); 
 
+  // --- TIMER E TIMEOUT LOGIC ---
+  useEffect(() => {
+      let timer: any;
+      
+      if (isLocalProcessing) {
+          timer = setInterval(() => {
+              setTimeLeft(prev => {
+                  if (prev <= 1) {
+                      // TIMEOUT ATINGIDO - ABORTAR PARA REINICIAR
+                      if (abortControllerRef.current) {
+                          console.log("Tempo esgotado (5m). Cancelando para reiniciar...");
+                          abortControllerRef.current.abort(); // Dispara o erro 'AbortError' no fetch
+                      }
+                      return 0;
+                  }
+                  return prev - 1;
+              });
+          }, 1000);
+      } else {
+          setTimeLeft(TIMEOUT_DURATION);
+      }
+
+      return () => clearInterval(timer);
+  }, [isLocalProcessing]);
+
   useEffect(() => {
     if (pendingMessage) {
         handleAddToQueue(pendingMessage);
@@ -81,37 +109,57 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       
       setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'done' as const } : m));
       
+      // Passa o ID da mensagem para que possamos reutilizá-lo em caso de retry se quisermos (ou criar novos)
+      // Aqui vamos criar uma nova mensagem de resposta
       await executeAiGeneration(text, att);
     };
     processQueue();
   }, [queue, isLocalProcessing]);
 
-  const executeAiGeneration = async (text: string, currentAttachments: Attachment[]) => {
-    setIsLocalProcessing(true); // Bloqueia inputs locais
-    setReasoningStep(0);
+  const executeAiGeneration = async (text: string, currentAttachments: Attachment[], isRetry = false, reuseMsgId?: string) => {
+    if (!isRetry) setIsLocalProcessing(true);
     
-    const modelMsgId = generateUUID();
+    setReasoningStep(0);
+    setTimeLeft(TIMEOUT_DURATION); // Reseta o timer visual e lógico
+    
+    // Cria novo controlador para esta tentativa
+    abortControllerRef.current = new AbortController();
+    
+    const modelMsgId = reuseMsgId || generateUUID();
 
-    // 1. INSERE O PLACEHOLDER 'PROCESSING' NO ESTADO GLOBAL
-    setMessages(prev => [
-        ...prev, 
-        { 
-            id: modelMsgId,
-            role: 'model', 
-            text: '', 
-            status: 'processing', // Gatilho visual
-            senderName: 'Agente IA'
-        }
-    ]);
+    if (!isRetry) {
+        // 1. INSERE O PLACEHOLDER 'PROCESSING' NO ESTADO GLOBAL APENAS NA PRIMEIRA VEZ
+        setMessages(prev => [
+            ...prev, 
+            { 
+                id: modelMsgId,
+                role: 'model', 
+                text: '', 
+                status: 'processing', // Gatilho visual
+                senderName: 'Agente IA'
+            }
+        ]);
+    } else {
+        // Se for retry, podemos atualizar a mensagem para dizer "Retentando..." se quisermos, 
+        // mas o usuário pediu loop transparente. Vamos manter o status 'processing'.
+        // Opcional: Adicionar log no console
+        console.log(`[Auto-Retry] Reiniciando tentativa de geração...`);
+    }
 
     try {
-      const project = await generatePluginCode(text, settings, currentProject, currentAttachments, currentUser);
+      const project = await generatePluginCode(
+          text, 
+          settings, 
+          currentProject, 
+          currentAttachments, 
+          currentUser,
+          abortControllerRef.current.signal // Passa o sinal
+      );
       
       // Atualiza o projeto no estado global IMEDIATAMENTE
       onProjectGenerated(project);
 
       // 2. ATUALIZA PARA 'DONE' COM O RESULTADO
-      // Fazemos isso antes de salvar no disco para garantir que a UI destrave (Loading Bar some)
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m, 
           text: project.explanation, 
@@ -121,17 +169,28 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       if (settings.enableSounds) playSound('success');
       
-      // REMOVIDO: speakText (TTS) conforme solicitado.
-      
-      // 3. SALVAMENTO NO DISCO (ASSÍNCRONO / NON-BLOCKING)
-      // Não usamos await aqui para não travar a UI no estado "Finalizando..." se o disco estiver lento
+      // 3. SALVAMENTO NO DISCO
       if (directoryHandle) {
           saveProjectToDisk(directoryHandle, project)
              .then(() => console.log("Projeto salvo no disco com sucesso."))
              .catch(e => console.warn("Erro ao salvar no disco (background):", e));
       }
+      
+      setIsLocalProcessing(false);
 
     } catch (error: any) {
+      // --- LÓGICA DE LOOP DE RETENTATIVA ---
+      if (error.message === 'TIMEOUT' || error.name === 'AbortError') {
+          // Não define status como done, não para o processamento.
+          // Chama recursivamente a função.
+          // Pequeno delay para evitar stack overflow imediato em caso de erros síncronos bizarros
+          setTimeout(() => {
+              executeAiGeneration(text, currentAttachments, true, modelMsgId);
+          }, 1000);
+          return; 
+      }
+
+      // Erro real (não timeout)
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m,
           text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
@@ -140,7 +199,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       } : m));
 
       if (settings.enableSounds) playSound('error');
-    } finally {
       setIsLocalProcessing(false);
     }
   };
@@ -163,6 +221,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
   const progressPercent = Math.min(100, Math.round(((reasoningStep + 1) / REASONING_STEPS.length) * 100));
+
+  // Helper para formatar tempo mm:ss
+  const formatTime = (seconds: number) => {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e] relative">
@@ -190,11 +255,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                            </span>
                            <span className="text-[10px] text-gray-500">{REASONING_STEPS[reasoningStep]}</span>
                         </div>
-                        <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                        <div className="w-full h-1.5 bg-gray-700 rounded-full overflow-hidden mb-2">
                            <div 
                              className="h-full bg-mc-accent transition-all duration-500 ease-out"
                              style={{ width: `${progressPercent}%` }}
                            ></div>
+                        </div>
+                        {/* TIMER DISPLAY */}
+                        <div className="flex items-center justify-end gap-1.5 text-[10px] text-gray-400 font-mono bg-black/20 py-1 px-2 rounded">
+                            <Timer className="w-3 h-3" />
+                            <span>Tempo Restante: <span className={timeLeft < 60 ? 'text-red-400' : 'text-white'}>{formatTime(timeLeft)}</span></span>
+                            {timeLeft === 0 && <span className="text-mc-gold ml-1 animate-pulse">(Reiniciando...)</span>}
                         </div>
                      </div>
                   </div>
