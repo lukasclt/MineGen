@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     base: '/',
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY || env.VITE_API_KEY || ""),
-      'process.env.STORAGE_URL': JSON.stringify(env.STORAGE_URL || env.VITE_STORAGE_URL || "")
+      'process.env.MONGODB_URI': JSON.stringify(env.MONGODB_URI || env.VITE_MONGODB_URI || "")
     },
     build: {
       outDir: 'dist',

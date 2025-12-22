@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database } from 'lucide-react';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -41,12 +41,12 @@ const App: React.FC = () => {
           const user = JSON.parse(savedUser);
           setCurrentUser(user);
           
-          // Se houver STORAGE_URL, tentamos sincronizar projetos da nuvem
+          // Se houver MONGODB_URI, tentamos sincronizar projetos da nuvem
           setIsCloudSyncing(true);
           const cloudProjects = await dbService.loadUserProjects(user.id);
           if (cloudProjects.length > 0) {
             setProjects(cloudProjects);
-            addLog("Sistema: Projetos sincronizados com a nuvem.");
+            addLog("Sistema: Projetos sincronizados com MongoDB Atlas.");
           } else {
             const savedProjectsStr = localStorage.getItem('minegen_projects');
             if (savedProjectsStr) setProjects(JSON.parse(savedProjectsStr));
@@ -179,11 +179,11 @@ const App: React.FC = () => {
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2 pointer-events-none">
         {isCloudSyncing ? (
           <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 animate-pulse">
-            <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando nuvem...
+            <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando...
           </div>
-        ) : (process.env as any).STORAGE_URL ? (
+        ) : (process.env as any).MONGODB_URI ? (
           <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2">
-            <Cloud className="w-3 h-3" /> MongoDB Conectado
+            <Database className="w-3 h-3" /> MongoDB Conectado
           </div>
         ) : (
           <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2">
@@ -220,7 +220,7 @@ const App: React.FC = () => {
                    <TerminalSquare className="w-10 h-10 opacity-20" />
                 </div>
                 <h2 className="text-lg font-medium text-[#cccccc]">Bem-vindo ao MineGen Workspace</h2>
-                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no { (process.env as any).STORAGE_URL ? 'MongoDB Atlas' : 'LocalStorage' }.</p>
+                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no { (process.env as any).MONGODB_URI ? 'MongoDB Atlas' : 'LocalStorage' }.</p>
                 <button onClick={handleOpenOrNewProject} className="bg-mc-accent text-white px-8 py-2.5 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold transition-all">Importar / Novo Projeto</button>
              </div>
           )}
