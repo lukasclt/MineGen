@@ -173,6 +173,34 @@ case "\`uname\`" in
     ;;
 esac
 
+# ----------------------------------------------------------------------------
+# MineGen AI Auto-Downloader for Gradle Wrapper
+# ----------------------------------------------------------------------------
+WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+# Using a specific commit hash or version to ensure stability. Using v8.5.0 tag.
+WRAPPER_URL="https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar"
+
+if [ ! -f "$WRAPPER_JAR" ]; then
+    warn "Gradle Wrapper JAR not found at $WRAPPER_JAR"
+    warn "Downloading from $WRAPPER_URL..."
+    
+    # Create directory if it doesn't exist
+    mkdir -p "$(dirname "$WRAPPER_JAR")"
+    
+    if command -v curl >/dev/null 2>&1; then
+        curl -L -o "$WRAPPER_JAR" "$WRAPPER_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O "$WRAPPER_JAR" "$WRAPPER_URL"
+    else
+        die "ERROR: 'curl' or 'wget' not found. Cannot auto-download gradle-wrapper.jar. Please install one of them or download the jar manually."
+    fi
+    
+    if [ ! -f "$WRAPPER_JAR" ]; then
+        die "ERROR: Download failed."
+    fi
+    warn "Download successful."
+fi
+
 CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
 
 # Determine the Java command to use to start the JVM.
@@ -341,6 +369,26 @@ goto fail
 :execute
 @rem Setup the command line
 
+@rem ----------------------------------------------------------------------------
+@rem MineGen AI Auto-Downloader for Gradle Wrapper (PowerShell Fallback)
+@rem ----------------------------------------------------------------------------
+set WRAPPER_JAR=%APP_HOME%\\gradle\\wrapper\\gradle-wrapper.jar
+set WRAPPER_URL=https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar
+
+if exist "%WRAPPER_JAR%" goto runGradle
+
+echo Gradle Wrapper JAR not found. Downloading...
+if not exist "%APP_HOME%\\gradle\\wrapper" mkdir "%APP_HOME%\\gradle\\wrapper"
+
+powershell -Command "try { Invoke-WebRequest -Uri '%WRAPPER_URL%' -OutFile '%WRAPPER_JAR%' -UseBasicParsing } catch { exit 1 }"
+
+if exist "%WRAPPER_JAR%" goto runGradle
+echo.
+echo ERROR: Failed to download gradle-wrapper.jar.
+echo Please check your internet connection or download it manually.
+goto fail
+
+:runGradle
 set CLASSPATH=%APP_HOME%\\gradle\\wrapper\\gradle-wrapper.jar
 
 @rem Execute Gradle
