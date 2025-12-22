@@ -89,8 +89,17 @@ const App: React.FC = () => {
           if (localIdx === -1) {
             merged.push(cloudP);
           } else {
-            // Lógica de merge: Se a nuvem for mais recente OU se tiver mais mensagens (sincronia de chat)
-            if (cloudP.lastModified > merged[localIdx].lastModified || cloudP.messages.length > merged[localIdx].messages.length) {
+            const localP = merged[localIdx];
+            
+            // Lógica de Merge:
+            // 1. Se o projeto da nuvem foi modificado depois, ele ganha.
+            // 2. Se o projeto da nuvem tem mais mensagens (ex: alguém falou algo), ele ganha.
+            // 3. Se o projeto da nuvem tem uma mensagem com status diferente (ex: mudou de 'processing' para 'done'), ele ganha.
+            
+            const cloudMessagesHash = JSON.stringify(cloudP.messages.map(m => m.status + m.id));
+            const localMessagesHash = JSON.stringify(localP.messages.map(m => m.status + m.id));
+            
+            if (cloudP.lastModified > localP.lastModified || cloudMessagesHash !== localMessagesHash) {
                merged[localIdx] = cloudP;
             }
           }
@@ -126,20 +135,18 @@ const App: React.FC = () => {
   };
 
   // POLLING DE SINCRONIZAÇÃO
-  // Aumenta a frequência quando tem projeto ativo para suportar o "Real-time" da animação
   useEffect(() => {
     if (!currentUser) return;
     
-    // Intervalo de sync de projetos (chat, arquivos)
-    const syncIntervalTime = currentProjectId ? 2000 : 8000; // 2s se ativo, 8s se inativo
+    // Intervalo de sync mais rápido se tiver projeto aberto (para ver animação)
+    const syncIntervalTime = currentProjectId ? 2000 : 8000; 
 
     const syncLoop = async () => {
-        if (!document.hidden) { // Apenas se a aba estiver visível
+        if (!document.hidden) { 
             await syncWithCloud(currentUser.id);
         }
     };
 
-    // Intervalo de convites
     const checkInvites = async () => {
       const invites = await dbService.checkPendingInvites(currentUser.email);
       if (invites.length > 0 && !incomingInvite) {
@@ -157,7 +164,7 @@ const App: React.FC = () => {
         clearInterval(intervalSync);
         clearInterval(intervalInvite);
     };
-  }, [currentUser, incomingInvite, currentProjectId]); // Depende de currentProjectId para mudar a velocidade
+  }, [currentUser, incomingInvite, currentProjectId]); 
 
   useEffect(() => {
     if (isLoaded) {

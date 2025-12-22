@@ -34,7 +34,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser
 }) => {
   const [input, setInput] = useState('');
-  // isLoading agora é derivado, mas mantemos para controle de input local
+  // isLocalProcessing agora serve apenas para bloquear o input localmente enquanto envia a request inicial
   const [isLocalProcessing, setIsLocalProcessing] = useState(false);
   const [reasoningStep, setReasoningStep] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -43,7 +43,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Detecta se há alguma mensagem sendo processada (seja por mim ou outro usuário)
+  // Detecta se há alguma mensagem sendo processada (seja por mim ou outro usuário remoto)
   const processingMessage = messages.find(m => m.status === 'processing' && m.role === 'model');
 
   useEffect(() => {
@@ -55,7 +55,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     let interval: any;
     if (processingMessage) {
         // Se a mensagem 'processing' acabou de aparecer, reseta o step visualmente
-        if (reasoningStep === 0) setReasoningStep(0);
+        // Se já estava lá (usuário entrou depois), continua a animação
         
         interval = setInterval(() => {
             setReasoningStep(prev => {
@@ -95,16 +95,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setIsLocalProcessing(true);
     setReasoningStep(0);
     
-    // ID temporário para a resposta do modelo
+    // ID para a resposta do modelo que será atualizada
     const modelMsgId = generateUUID();
 
-    // 1. Inserir Placeholder de Processamento (Isso sincroniza com o banco via App.tsx)
+    // 1. CRÍTICO: Inserir Placeholder de Processamento IMEDIATAMENTE.
+    // Isso atualiza o state 'projects' no App.tsx, que dispara o saveProject para o DB.
+    // O Usuário 2 vai baixar essa mensagem via polling e ver a animação.
     setMessages(prev => [
         ...prev, 
         { 
             id: modelMsgId,
             role: 'model', 
-            text: '', 
+            text: '', // Texto vazio enquanto processa
             status: 'processing', // Isso ativa a UI de loading para TODOS
             senderName: 'Agente IA'
         }
@@ -138,7 +140,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (settings.enableTTS) speakText(project.explanation);
 
     } catch (error: any) {
-      // Em caso de erro, atualiza a mensagem placeholder
+      // Em caso de erro, atualiza a mensagem placeholder para erro
       setMessages(prev => prev.map(m => m.id === modelMsgId ? { 
           ...m,
           text: `**Erro na Geração:**\n${error.message}\n\n*Verifique se a chave API é válida ou tente outro modelo.*`, 
@@ -167,7 +169,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setAttachments([]);
   };
 
-  // Helper UUID
   const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
 
   const progressPercent = Math.min(100, Math.round(((reasoningStep + 1) / REASONING_STEPS.length) * 100));
@@ -187,7 +188,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {msg.role === 'user' && msg.senderId && <Shield className="w-2.5 h-2.5 text-mc-accent" />}
               </div>
               
-              {/* Se a mensagem for do Modelo e estiver 'processing', mostra a animação no lugar do texto */}
+              {/* LÓGICA DE RENDERIZAÇÃO: Se status for 'processing', mostra a barra, independente de quem pediu */}
               {msg.role === 'model' && msg.status === 'processing' ? (
                   <div className="flex gap-3 animate-fade-in w-full">
                      <div className="bg-[#252526] border border-[#333] rounded-lg p-3 w-64 shadow-lg">
