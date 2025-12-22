@@ -203,6 +203,42 @@ export const dbService = {
     );
   },
 
+  // --- MEMBROS ---
+
+  async removeMember(projectId: string, email: string, requesterId: string): Promise<boolean> {
+      return tryFetch(
+          `${API_BASE}/projects/${projectId}/members`,
+          {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email, requesterId })
+          },
+          () => {
+              // Fallback Local
+              const projects = LocalDB.getProjects();
+              const pIdx = projects.findIndex(p => p.id === projectId);
+              if (pIdx === -1) throw new Error("Projeto não encontrado.");
+
+              const project = projects[pIdx];
+              // Verifica permissões (Dono pode remover, ou o próprio user)
+              const requester = LocalDB.getUsers().find(u => u.id === requesterId);
+              if (!requester) throw new Error("Usuário não autenticado.");
+
+              const isOwner = project.ownerId === requesterId;
+              const isSelf = requester.email === email;
+
+              if (!isOwner && !isSelf) throw new Error("Permissão negada (Offline).");
+
+              if (project.members) {
+                  project.members = project.members.filter(m => m !== email);
+                  projects[pIdx] = project;
+                  localStorage.setItem('minegen_db_projects', JSON.stringify(projects));
+              }
+              return true;
+          }
+      );
+  },
+
   // --- CONVITES ---
 
   async sendInvite(projectId: string, projectName: string, senderId: string, senderName: string, targetEmail: string): Promise<boolean> {

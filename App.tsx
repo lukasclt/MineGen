@@ -276,6 +276,37 @@ const App: React.FC = () => {
     addLog(`Sistema: Convite adicionado localmente para ${email}.`);
   };
 
+  const handleRemoveMember = async (projectId: string, email: string) => {
+      if (!currentUser) return;
+      setIsCloudSyncing(true);
+      try {
+          await dbService.removeMember(projectId, email, currentUser.id);
+          
+          if (email === currentUser.email) {
+              // Se eu saí, remove o projeto da minha lista
+              setProjects(prev => prev.filter(p => p.id !== projectId));
+              if (currentProjectId === projectId) setCurrentProjectId(null);
+              playSound('click');
+              addLog("Sistema: Você saiu do projeto.");
+          } else {
+              // Se eu removi alguém, atualiza a lista de membros
+              setProjects(prev => prev.map(p => {
+                  if (p.id === projectId) {
+                      return { ...p, members: p.members.filter(m => m !== email) };
+                  }
+                  return p;
+              }));
+              playSound('click');
+              addLog(`Sistema: Membro ${email} removido.`);
+          }
+      } catch (e: any) {
+          addLog(`Erro: ${e.message}`);
+          playSound('error');
+      } finally {
+          setIsCloudSyncing(false);
+      }
+  };
+
   const handleRespondInvite = async (accept: boolean) => {
     if (!incomingInvite) return;
     setIsCloudSyncing(true);
@@ -424,6 +455,7 @@ const App: React.FC = () => {
         setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, settings: typeof newS === 'function' ? newS(p.settings) : newS } : p))}
         currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
         onInviteMember={handleInvite}
+        onRemoveMember={handleRemoveMember}
         onDeleteAccount={handleDeleteAccount}
       />
 

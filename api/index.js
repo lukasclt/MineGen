@@ -268,6 +268,44 @@ router.delete('/projects/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ message: 'Erro ao deletar projeto.' }); }
 });
 
+// --- MEMBROS ---
+
+router.delete('/projects/:id/members', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { email, requesterId } = req.body;
+
+        const projectKey = getKey('project', id);
+        const projectJson = await db.get(projectKey);
+        if (!projectJson) return res.status(404).json({ message: 'Projeto não encontrado.' });
+        
+        const project = JSON.parse(projectJson);
+        
+        // Verifica permissão (Dono pode remover qualquer um, Membro pode remover a si mesmo)
+        const requesterJson = await db.get(getKey('user', requesterId));
+        if (!requesterJson) return res.status(403).json({ message: 'Acesso negado.' });
+        const requester = JSON.parse(requesterJson);
+
+        const isOwner = project.ownerId === requesterId;
+        const isSelf = requester.email === email;
+
+        if (!isOwner && !isSelf) {
+            return res.status(403).json({ message: 'Você não tem permissão para remover este membro.' });
+        }
+
+        if (project.members) {
+            project.members = project.members.filter(m => m !== email);
+            project.lastModified = Date.now();
+            await db.set(projectKey, JSON.stringify(project));
+        }
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: 'Erro ao remover membro.' });
+    }
+});
+
 // --- CONVITES & LINKS ---
 
 router.post('/invites/link', async (req, res) => {

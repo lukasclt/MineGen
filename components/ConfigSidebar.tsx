@@ -26,13 +26,14 @@ interface ConfigSidebarProps {
   onSelectProject: (id: string) => void;
   onCreateProject: () => void; 
   onDeleteProject: (id: string) => void;
-  onInviteMember: (email: string) => void; 
+  onInviteMember: (email: string) => void;
+  onRemoveMember: (projectId: string, email: string) => void; 
 }
 
 const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ 
   settings, setSettings, isOpen, toggleSidebar, showInstallButton, onInstall,
   projects, currentProjectId, onSelectProject, onCreateProject, onDeleteProject,
-  currentUser, onOpenLogin, onLogout, onInviteMember, onDeleteAccount
+  currentUser, onOpenLogin, onLogout, onInviteMember, onRemoveMember, onDeleteAccount
 }) => {
   const [activeTab, setActiveTab] = useState<'chats' | 'config' | 'members'>('chats');
   const [inviteEmail, setInviteEmail] = useState('');
@@ -210,18 +211,53 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                        </div>
                        <Shield className="w-3.5 h-3.5 text-mc-gold" />
                     </div>
-                    {(activeProject.members || []).map((memberEmail, i) => (
-                      <div key={i} className="flex items-center gap-3 p-2.5 bg-gray-800/40 border border-gray-700 rounded-lg group">
-                        <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400">
-                          {memberEmail && memberEmail.length > 0 ? memberEmail[0].toUpperCase() : '?'}
+                    {(activeProject.members || []).map((memberEmail, i) => {
+                      const isMe = currentUser?.email === memberEmail;
+                      const isOwner = activeProject.ownerId === currentUser?.id;
+                      
+                      return (
+                        <div key={i} className="flex items-center gap-3 p-2.5 bg-gray-800/40 border border-gray-700 rounded-lg group">
+                          <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400">
+                            {memberEmail && memberEmail.length > 0 ? memberEmail[0].toUpperCase() : '?'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                             <p className="text-xs font-medium text-gray-300 truncate">{memberEmail}</p>
+                             <p className="text-[9px] text-gray-500 uppercase">Editor</p>
+                          </div>
+                          
+                          {/* BOTÃO PARA SAIR DO PROJETO (SE FOR EU) */}
+                          {isMe && (
+                              <button 
+                                onClick={() => {
+                                    if (confirm("Tem certeza que deseja sair deste projeto?")) {
+                                        onRemoveMember(activeProject.id, memberEmail);
+                                    }
+                                }}
+                                className="p-1.5 bg-red-900/30 text-red-400 rounded hover:bg-red-500 hover:text-white transition-all flex items-center gap-1"
+                                title="Sair do Projeto"
+                              >
+                                  <LogOut className="w-3 h-3" />
+                                  <span className="text-[10px] font-bold">Sair</span>
+                              </button>
+                          )}
+
+                          {/* BOTÃO PARA EXPULSAR (SE FOR DONO E NÃO FOR EU) */}
+                          {isOwner && !isMe && (
+                              <button 
+                                onClick={() => {
+                                    if (confirm(`Tem certeza que deseja expulsar ${memberEmail}?`)) {
+                                        onRemoveMember(activeProject.id, memberEmail);
+                                    }
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-900/20 rounded transition-all"
+                                title="Expulsar Membro"
+                              >
+                                  <UserX className="w-3.5 h-3.5" />
+                              </button>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                           <p className="text-xs font-medium text-gray-300 truncate">{memberEmail}</p>
-                           <p className="text-[9px] text-gray-500 uppercase">Editor</p>
-                        </div>
-                        <button className="opacity-0 group-hover:opacity-100 p-1 text-gray-500 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
-                      </div>
-                    ))}
+                      );
+                    })}
                  </div>
                ) : (
                  <p className="text-[10px] text-gray-600 italic text-center py-4">Selecione um projeto para ver os membros.</p>
