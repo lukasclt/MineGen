@@ -238,9 +238,8 @@ export const dbService = {
         body: JSON.stringify({ projectId, createdBy })
       },
       () => {
-         // Fallback Link: Gera um token falso que o 'joinProjectByLink' local vai reconhecer
-         const token = `local-link-${projectId}-${Date.now()}`;
-         // Salvar token em localStorage se quisesse validar, mas para mock simplificado vamos embutir o ID no token
+         // Fallback Link: Usa delimiter :: para não quebrar UUIDs
+         const token = `local-link::${projectId}::${Date.now()}`;
          return token;
       }
     );
@@ -256,14 +255,15 @@ export const dbService = {
       },
       () => {
          // Lógica local para link
-         if (!token.startsWith('local-link-')) throw new Error("Link inválido ou de ambiente diferente.");
-         const parts = token.split('-');
-         const projectId = parts[2]; // local-link-ID-DATE
+         if (!token.startsWith('local-link::')) throw new Error("Link inválido ou de ambiente diferente (Online/Offline mismatch).");
+         
+         const parts = token.split('::');
+         const projectId = parts[1]; // local-link::ID::DATE
          
          const projects = LocalDB.getProjects();
          const projectIdx = projects.findIndex(p => p.id === projectId);
          
-         if (projectIdx === -1) throw new Error("Projeto não encontrado (Local).");
+         if (projectIdx === -1) throw new Error("Projeto não encontrado (Local). O projeto precisa existir neste navegador.");
          
          const project = projects[projectIdx];
          if (!project.members) project.members = [];
