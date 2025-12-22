@@ -8,7 +8,7 @@ import Terminal from './components/Terminal';
 import AuthModal from './components/AuthModal';
 import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile, User } from './types';
 import { DEFAULT_SETTINGS } from './constants';
-import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk, verifyPermission, checkPermissionStatus } from './services/fileSystem';
+import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk, verifyPermission, checkPermissionStatus, saveProjectToDisk } from './services/fileSystem';
 import { dbService, Invite } from './services/dbService';
 import { playSound, speakText } from './services/audioService';
 
@@ -78,17 +78,14 @@ const App: React.FC = () => {
   }, []);
 
   // CORREÇÃO AUTOMÁTICA DE NOME DO DONO
-  // Se o usuário logado é dono de um projeto mas o ownerName está errado/vazio, corrige e salva.
   useEffect(() => {
     if (!currentUser || projects.length === 0 || !isLoaded) return;
     
     let changed = false;
     const updatedProjects = projects.map(p => {
-        // Se eu sou o dono, E (o nome está diferente OU faltando)
         if (p.ownerId === currentUser.id && p.ownerName !== currentUser.username) {
             changed = true;
             const updated = { ...p, ownerName: currentUser.username };
-            // Salva individualmente no banco para garantir consistência
             dbService.saveProject(updated).catch(err => console.error("Auto-patch save failed", err));
             return updated;
         }
@@ -119,10 +116,6 @@ const App: React.FC = () => {
             merged.push(cloudP);
           } else {
             const localP = merged[localIdx];
-            
-            // CORREÇÃO DE SYNC: Só sobrescreve o local se o Cloud for ESTRITAMENTE MAIS RECENTE.
-            // Isso evita que alterações locais recentes (mensagens enviadas) sejam sobrescritas pelo estado antigo da nuvem
-            // antes que o salvamento assíncrono ocorra.
             if (cloudP.lastModified > localP.lastModified) {
                merged[localIdx] = cloudP;
             }
@@ -158,11 +151,8 @@ const App: React.FC = () => {
       }
   };
 
-  // POLLING DE SINCRONIZAÇÃO
   useEffect(() => {
     if (!currentUser) return;
-    
-    // Intervalo de sync mais rápido se tiver projeto aberto (para ver animação e membros entrando)
     const syncIntervalTime = currentProjectId ? 2000 : 8000; 
 
     const syncLoop = async () => {
@@ -219,6 +209,26 @@ const App: React.FC = () => {
     };
     loadHandle();
   }, [currentProjectId]);
+
+  // AUTO-SYNC STATE TO DISK
+  // Garante que qualquer atualização no projeto (seja por IA ou Cloud Sync) seja espelhada no disco
+  useEffect(() => {
+      if (!activeProject || !directoryHandle || !hasFilePermission) return;
+      
+      const timeoutId = setTimeout(async () => {
+          if (activeProject.generatedProject) {
+             try {
+                 await saveProjectToDisk(directoryHandle, activeProject.generatedProject);
+                 // Salva também o estado (metadados, chat, etc)
+                 await saveProjectStateToDisk(directoryHandle, activeProject);
+             } catch (e) {
+                 console.warn("Falha no Auto-Save para o disco:", e);
+             }
+          }
+      }, 2000); // 2 segundos de debounce para evitar spam de escrita
+
+      return () => clearTimeout(timeoutId);
+  }, [activeProject, directoryHandle, hasFilePermission]);
 
   const handleReconnectFolder = async () => {
       if (!directoryHandle) return;
@@ -277,13 +287,11 @@ const App: React.FC = () => {
           await dbService.removeMember(projectId, email, currentUser.id);
           
           if (email === currentUser.email) {
-              // Se eu saí, remove o projeto da minha lista
               setProjects(prev => prev.filter(p => p.id !== projectId));
               if (currentProjectId === projectId) setCurrentProjectId(null);
               playSound('click');
               addLog("Sistema: Você saiu do projeto.");
           } else {
-              // Se eu removi alguém, atualiza a lista de membros
               setProjects(prev => prev.map(p => {
                   if (p.id === projectId) {
                       return { ...p, members: p.members.filter(m => m !== email) };
@@ -341,7 +349,6 @@ const App: React.FC = () => {
           setHasFilePermission(true);
           await saveDirectoryHandleToDB(safeExisting.id, handle);
           
-          // Salvar imediatamente na nuvem se logado
           if (currentUser) {
               await dbService.saveProject(safeExisting);
           }
@@ -350,12 +357,11 @@ const App: React.FC = () => {
           const detected = detectProjectSettings(loaded.files);
           const newId = generateUUID();
           
-          // CRÍTICO: Definindo ownerName na criação
           const newP: SavedProject = {
             id: newId,
             name: detected.name || handle.name,
             ownerId: currentUser?.id || 'guest',
-            ownerName: currentUser?.username || 'Convidado', // Correção do Dono
+            ownerName: currentUser?.username || 'Convidado',
             members: [],
             lastModified: Date.now(),
             settings: { ...DEFAULT_SETTINGS, name: detected.name || handle.name, ...detected },
@@ -368,7 +374,6 @@ const App: React.FC = () => {
           setHasFilePermission(true);
           await saveDirectoryHandleToDB(newId, handle);
 
-          // CRÍTICO: Salvar imediatamente na nuvem para permitir links de convite
           if (currentUser) {
               await dbService.saveProject(newP);
               addLog("Sistema: Projeto salvo na nuvem.");
@@ -449,7 +454,7 @@ const App: React.FC = () => {
         setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
             ...p, 
             settings: typeof newS === 'function' ? newS(p.settings) : newS,
-            lastModified: Date.now() // Atualiza timestamp ao mudar configs
+            lastModified: Date.now() 
         } : p))}
         currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
         onInviteMember={handleInvite}
@@ -465,7 +470,7 @@ const App: React.FC = () => {
               setMessages={upd => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
                   ...p, 
                   messages: typeof upd === 'function' ? upd(p.messages) : upd,
-                  lastModified: Date.now() // Atualiza timestamp ao enviar mensagem
+                  lastModified: Date.now() 
               } : p))}
               currentProject={activeProject.generatedProject} onProjectGenerated={handleProjectGenerated}
               directoryHandle={directoryHandle} onSetDirectoryHandle={setDirectoryHandle}
