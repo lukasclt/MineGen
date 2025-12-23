@@ -35,7 +35,6 @@ const App: React.FC = () => {
   const isReadingRef = useRef(false); 
   const isWritingRef = useRef(false);
   const lastSavedStateRef = useRef<string>('');
-  const saveTimeoutRef = useRef<any>(null);
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
   const isBackendConnected = !!((process.env as any).API_URL || true); 
@@ -97,8 +96,7 @@ const App: React.FC = () => {
 
 
   const syncWithCloud = async (userId: string) => {
-    // TRAVA: Se estamos enviando dados (ex: limpando chat, digitando), NÃO leia da nuvem agora.
-    // Isso garante que a versão local (que está sendo editada) não seja sobrescrita pela versão antiga da nuvem antes de salvar.
+    // TRAVA: Se estamos enviando dados, NÃO leia da nuvem agora.
     if (isWritingRef.current) return;
     
     isReadingRef.current = true;
@@ -108,7 +106,6 @@ const App: React.FC = () => {
         
         if (cloudProjects.length > 0) {
           setProjects(prevLocal => {
-            // Se o usuário começou a escrever durante o fetch, aborta para não sobrescrever a ação dele
             if (isWritingRef.current) return prevLocal;
 
             const merged = [...prevLocal];
@@ -119,6 +116,7 @@ const App: React.FC = () => {
             }));
 
             let hasChanges = false;
+            let externalUpdateDetected = false;
 
             sanitizedCloud.forEach(cloudP => {
               const localIdx = merged.findIndex(p => p.id === cloudP.id);
@@ -128,15 +126,22 @@ const App: React.FC = () => {
               } else {
                 const localP = merged[localIdx];
                 
-                // --- LÓGICA DE SINCRONIZAÇÃO ABSOLUTA ---
-                // Se o timestamp da nuvem for maior que o local, a nuvem é a verdade.
-                // Isso cobre: Limpar Chat, Nova Config, Novo Código.
+                // Se a versão da nuvem é mais nova que a local, alguém editou!
                 if (cloudP.lastModified > localP.lastModified) {
-                    merged[localIdx] = cloudP; // Substituição completa e direta
+                    merged[localIdx] = cloudP; // Substituição completa
                     hasChanges = true;
+                    // Detecta se é o projeto ativo e se realmente mudou conteúdo
+                    if (currentProjectId === cloudP.id) {
+                        externalUpdateDetected = true;
+                    }
                 }
               }
             });
+
+            if (externalUpdateDetected) {
+                // Toca som se alguém fez alteração (colaboração em tempo real)
+                playSound('message'); 
+            }
 
             return hasChanges ? merged : prevLocal;
           });
@@ -202,8 +207,8 @@ const App: React.FC = () => {
     };
   }, [currentUser, incomingInvite, currentProjectId]); 
 
-  // PUSH REATIVO COM DEBOUNCE DE 3 SEGUNDOS
-  // Dispara SEMPRE que 'activeProject' muda, mas espera 3s antes de enviar
+  // PUSH REATIVO SEM DELAY (INSTANTÂNEO)
+  // Dispara SEMPRE que 'activeProject' muda
   useEffect(() => {
     if (isLoaded) {
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
@@ -227,25 +232,18 @@ const App: React.FC = () => {
                 // 1. Bloqueia leitura (Somos a autoridade enquanto editamos)
                 isWritingRef.current = true;
                 
-                // 2. Limpa o timer anterior se houver (Debounce)
-                if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-
-                // 3. Define novo timer de 3 segundos
-                saveTimeoutRef.current = setTimeout(() => {
-                    setIsCloudSyncing(true);
-                    
-                    dbService.saveProject(activeProject)
-                        .then(() => {
-                            lastSavedStateRef.current = currentStateStr;
-                        })
-                        .catch(e => console.warn("Erro ao salvar:", e))
-                        .finally(() => {
-                            // 4. Libera leitura após o envio completo
-                            isWritingRef.current = false;
-                            setIsCloudSyncing(false);
-                            saveTimeoutRef.current = null;
-                        });
-                }, 3000); // ATRASO DE 3 SEGUNDOS
+                // 2. Envia imediatamente (SEM TIMEOUT)
+                setIsCloudSyncing(true);
+                
+                dbService.saveProject(activeProject)
+                    .then(() => {
+                        lastSavedStateRef.current = currentStateStr;
+                    })
+                    .catch(e => console.warn("Erro ao salvar:", e))
+                    .finally(() => {
+                        isWritingRef.current = false;
+                        setIsCloudSyncing(false);
+                    });
             }
         }
       } else {
@@ -275,7 +273,6 @@ const App: React.FC = () => {
   useEffect(() => {
       if (!activeProject || !directoryHandle || !hasFilePermission) return;
       
-      // Delay pequeno apenas para disco físico para não travar IO
       const timeoutId = setTimeout(async () => {
           if (activeProject.generatedProject) {
              try {

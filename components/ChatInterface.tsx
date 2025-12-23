@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User, SavedProject } from '../types';
-import { Send, Bot, User as UserIcon, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Paperclip, X, Clock, Shield, Timer, HardDrive, StopCircle, ListPlus, Users, Eye } from 'lucide-react';
+import { Send, Bot, User as UserIcon, AlertCircle, Trash2, Loader2, CheckCircle2, FileText, Paperclip, X, Clock, Shield, Timer, HardDrive, StopCircle, ListPlus, Eye } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { saveProjectToDisk, saveProjectStateToDisk } from '../services/fileSystem';
 import { playSound } from '../services/audioService';
@@ -39,16 +39,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [input, setInput] = useState('');
   const [isLocalProcessing, setIsLocalProcessing] = useState(false);
   
-  // Controle de Threads (Chats por Usuário)
-  const [activeThreadId, setActiveThreadId] = useState<string>(currentUser?.id || 'global');
+  // No modo privado, a thread ativa é SEMPRE o ID do usuário atual
+  const activeThreadId = currentUser?.id || 'guest';
 
-  // Garante que se o usuário mudar (login/logout), a thread ativa muda
-  useEffect(() => {
-    if (currentUser) {
-        setActiveThreadId(currentUser.id);
-    }
-  }, [currentUser?.id]);
-  
   // Controle preciso da porcentagem (0 a 100)
   const [progressValue, setProgressValue] = useState(0);
   
@@ -61,64 +54,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null); // Ref para textarea
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Verifica se sou o dono do projeto
-  const isOwner = currentUser && fullProject && currentUser.id === fullProject.ownerId;
-
-  // --- FILTRAGEM DE MENSAGENS POR THREAD ---
+  // --- FILTRAGEM ESTRITA DE MENSAGENS (PRIVACIDADE TOTAL) ---
   const threadMessages = useMemo(() => {
+      if (!currentUser) return [];
       return messages.filter(m => {
-          // Retrocompatibilidade: Mensagens sem threadId vão para o owner ou para a thread atual se for vazia
-          const tId = m.threadId || fullProject?.ownerId || 'global';
-          return tId === activeThreadId;
+          // Só mostra mensagens onde threadId é igual ao meu ID
+          // Se for uma mensagem legada sem threadId, assume que é do dono, então só mostra se eu for o dono
+          const tId = m.threadId || (fullProject?.ownerId === currentUser.id ? currentUser.id : 'unknown');
+          return tId === currentUser.id;
       });
-  }, [messages, activeThreadId, fullProject]);
+  }, [messages, currentUser, fullProject]);
 
-  // CRÍTICO: Detecta se há alguma mensagem com status 'processing' NA THREAD ATUAL
+  // Detecta se há alguma mensagem com status 'processing' NA MINHA THREAD
   const processingMessage = threadMessages.find(m => m.status === 'processing' && m.role === 'model');
-
-  // --- LISTA DE MEMBROS PARA ABAS ---
-  const threadList = useMemo(() => {
-     const list: { id: string, label: string, role: string }[] = [];
-     
-     if (fullProject) {
-        // Dono
-        list.push({ 
-            id: fullProject.ownerId, 
-            label: fullProject.ownerName || 'Dono',
-            role: 'admin'
-        });
-        
-        // Membros
-        (fullProject.members || []).forEach(email => {
-             const senderMsg = messages.find(m => m.senderName && (m.threadId === email || m.senderId === email));
-             // Adiciona lógica extra se necessário para mapear emails para IDs reais
-        });
-        
-        // Adiciona threads que existem nas mensagens mas não estão na lista explicita
-        const uniqueThreads = Array.from(new Set(messages.map(m => m.threadId).filter(Boolean)));
-        uniqueThreads.forEach(tId => {
-            if (!list.find(i => i.id === tId)) {
-                const sample = messages.find(m => m.threadId === tId);
-                list.push({
-                    id: tId as string,
-                    label: sample?.senderName || 'Desconhecido',
-                    role: 'editor'
-                });
-            }
-        });
-     }
-     
-     // Garante que EU estou na lista mesmo se não mandei msg
-     if (currentUser && !list.find(i => i.id === currentUser.id)) {
-         list.push({ id: currentUser.id, label: currentUser.username, role: 'me' });
-     }
-
-     return list;
-  }, [fullProject, messages, currentUser]);
-
-  // Permissão de escrita: Posso escrever APENAS se for minha própria thread.
-  // Se for Admin vendo outro, "isOwner" não dá mais permissão de escrita, apenas leitura.
-  const canWrite = (currentUser && activeThreadId === currentUser.id);
 
   // Auto-resize do Textarea
   useEffect(() => {
@@ -185,10 +133,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     if (pendingMessage) {
-        // Se eu não puder escrever na thread atual (ex: sou membro vendo outro membro), forço minha thread
-        if (currentUser && !canWrite) {
-            setActiveThreadId(currentUser.id);
-        }
         handleAddToQueue(pendingMessage);
         if (onClearPendingMessage) onClearPendingMessage();
     }
@@ -230,7 +174,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             ...prev, 
             { 
                 id: modelMsgId,
-                threadId: activeThreadId, // A resposta da IA fica na thread ATIVA (mesmo se for o admin falando no chat do membro)
+                threadId: activeThreadId, // A resposta da IA é sempre na MINHA thread
                 role: 'model', 
                 text: '', 
                 status: 'processing',
@@ -311,19 +255,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const handleAddToQueue = (text: string) => {
     if (!text.trim() && attachments.length === 0) return;
-    if (!canWrite) return; 
 
     const msgId = generateUUID();
     
     const userMessage: ChatMessage = { 
         id: msgId, 
-        threadId: activeThreadId, // Mensagem vai para a thread que estou visualizando
+        threadId: activeThreadId, 
         role: 'user', 
         text, 
         attachments: [...attachments], 
         status: 'queued',
         senderId: currentUser?.id, 
-        senderName: currentUser?.username || 'Convidado'
+        senderName: currentUser?.username || 'Você'
     };
     
     setMessages(prev => [...prev, userMessage]);
@@ -331,14 +274,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setInput('');
     setAttachments([]);
     
-    // Reseta altura do textarea
     if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
     }
   };
 
   const handleClearThread = async () => {
-    if (window.confirm("Limpar histórico DESTA conversa? Isso não afeta outros membros.")) {
+    if (window.confirm("Limpar seu histórico de conversa?")) {
         setMessages(prev => prev.filter(m => m.threadId !== activeThreadId));
         playSound('click');
     }
@@ -365,63 +307,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   return (
     <div className="flex flex-col h-full bg-[#1e1e1e] relative min-w-0">
       
-      {/* HEADER: Thread Switcher */}
-      <div className="bg-[#252526] border-b border-[#333] px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 h-14 z-20 shadow-sm">
-         <span className="text-[10px] font-bold text-gray-500 uppercase shrink-0 mr-2 flex items-center gap-1">
-            <Users className="w-3 h-3" /> Agentes:
-         </span>
-         
-         {threadList.map((thread) => {
-            const isActive = activeThreadId === thread.id;
-            const isMe = currentUser && thread.id === currentUser.id;
-            
-            return (
-                <button
-                   key={thread.id}
-                   onClick={() => setActiveThreadId(thread.id)}
-                   className={`
-                      relative group flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all min-w-[120px] shrink-0
-                      ${isActive 
-                          ? 'bg-gray-800 border-mc-accent shadow-md' 
-                          : 'bg-[#1e1e1e] border-[#333] hover:border-gray-600 opacity-70 hover:opacity-100'}
-                   `}
-                >
-                   <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${isActive ? 'bg-mc-accent text-white' : 'bg-gray-700 text-gray-400'}`}>
-                       {thread.label[0].toUpperCase()}
-                   </div>
-                   <div className="flex flex-col items-start min-w-0">
-                       <span className={`text-xs font-medium truncate max-w-[80px] ${isActive ? 'text-white' : 'text-gray-400'}`}>
-                           {thread.label} {isMe && '(Você)'}
-                       </span>
-                   </div>
-                   {isActive && (
-                       <div className="absolute top-0 right-0 w-2 h-2 bg-mc-green rounded-full border border-[#252526]"></div>
-                   )}
-                </button>
-            );
-         })}
-      </div>
-
-      {/* Botão Flutuante de Limpar Chat (Thread Atual) */}
-      {threadMessages.length > 0 && canWrite && (
-          <div className="absolute top-16 right-4 z-10">
+      {/* HEADER: Apenas título simples, sem abas de outros usuários */}
+      <div className="bg-[#252526] border-b border-[#333] px-4 py-3 flex items-center justify-between shadow-sm shrink-0">
+         <div className="flex items-center gap-2">
+             <Bot className="w-4 h-4 text-mc-accent" />
+             <span className="text-sm font-bold text-gray-200">Seu Agente Pessoal</span>
+         </div>
+         {threadMessages.length > 0 && (
             <button 
                 onClick={handleClearThread}
-                className="p-1.5 bg-[#252526]/80 hover:bg-red-900/80 text-gray-500 hover:text-red-200 rounded-md border border-[#333] hover:border-red-500/30 transition-all shadow-lg backdrop-blur-sm"
-                title="Limpar Esta Conversa"
+                className="text-gray-500 hover:text-red-400 p-1.5 hover:bg-red-900/20 rounded transition-colors"
+                title="Limpar Chat"
             >
                 <Trash2 className="w-4 h-4" />
             </button>
-          </div>
-      )}
+         )}
+      </div>
 
       {/* MENSAGENS */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar relative">
         {threadMessages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50 select-none">
                 <Bot className="w-12 h-12 mb-2" />
-                <p className="text-sm font-medium">Chat do Agente de {threadList.find(t => t.id === activeThreadId)?.label}</p>
-                <p className="text-xs">Inicie uma conversa para gerar código.</p>
+                <p className="text-sm font-medium">Olá, {currentUser?.username}</p>
+                <p className="text-xs">Estou pronto para ajudar no código.</p>
             </div>
         ) : (
             threadMessages.map((msg, idx) => (
@@ -432,8 +341,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 
                 <div className={`max-w-[85%] flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div className="flex items-center gap-1.5 px-1">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{msg.senderName || (msg.role === 'model' ? 'Agente IA' : 'Usuário')}</span>
-                    {msg.role === 'user' && msg.senderId && <Shield className="w-2.5 h-2.5 text-mc-accent" />}
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-tighter">{msg.senderName || (msg.role === 'model' ? 'Agente IA' : 'Você')}</span>
                 </div>
                 
                 {msg.role === 'model' && msg.status === 'processing' ? (
@@ -446,7 +354,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                                     {displayPercent >= 100 ? "Concluído" : `Gerando... ${displayPercent}%`}
                                 </span>
                                 
-                                {displayPercent < 100 && isLocalProcessing && canWrite && (
+                                {displayPercent < 100 && isLocalProcessing && (
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); handleStopGeneration(); }}
                                         className="text-gray-500 hover:text-red-400 transition-colors p-1 bg-black/20 rounded hover:bg-red-900/30 ml-2"
@@ -499,77 +407,66 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       {/* INPUT AREA */}
       <div className="p-3 bg-[#1e1e1e] border-t border-[#333] shrink-0">
-        {canWrite ? (
-             /* MODO EDITOR: POSSO ESCREVER */
+        {attachments.length > 0 && (
+        <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
+            {attachments.map((att, i) => (
+            <div key={i} className="relative bg-[#2d2d2d] rounded p-2 flex items-center gap-2 border border-[#444] shrink-0">
+                <FileText className="w-5 h-5 text-mc-accent" />
+                <span className="text-[10px] text-gray-300 max-w-[80px] truncate">{att.name}</span>
+                <button onClick={() => setAttachments(p => p.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-red-500 rounded-full p-0.5"><X className="w-3 h-3 text-white" /></button>
+            </div>
+            ))}
+        </div>
+        )}
+        <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2 items-end">
+        
+        <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => {
+            const files = Array.from(e.target.files || []) as File[];
+            files.forEach(f => {
+            const r = new FileReader();
+            r.onload = () => setAttachments(p => [...p, { type: 'text', name: f.name, content: r.result as string }]);
+            r.readAsText(f);
+            });
+        }} />
+        
+        <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-gray-400 hover:text-white transition-colors mb-0.5"><Paperclip className="w-5 h-5" /></button>
+        
+        {processingMessage && isLocalProcessing ? (
             <>
-                {attachments.length > 0 && (
-                <div className="flex gap-2 mb-2 overflow-x-auto pb-1">
-                    {attachments.map((att, i) => (
-                    <div key={i} className="relative bg-[#2d2d2d] rounded p-2 flex items-center gap-2 border border-[#444] shrink-0">
-                        <FileText className="w-5 h-5 text-mc-accent" />
-                        <span className="text-[10px] text-gray-300 max-w-[80px] truncate">{att.name}</span>
-                        <button onClick={() => setAttachments(p => p.filter((_, idx) => idx !== i))} className="absolute -top-1.5 -right-1.5 bg-red-500 rounded-full p-0.5"><X className="w-3 h-3 text-white" /></button>
-                    </div>
-                    ))}
+                <div className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2.5 text-sm text-gray-400 opacity-70 cursor-not-allowed">
+                    Aguarde a resposta da IA...
                 </div>
-                )}
-                <form onSubmit={(e) => { e.preventDefault(); handleAddToQueue(input); }} className="flex gap-2 items-end">
                 
-                <input type="file" multiple ref={fileInputRef} className="hidden" onChange={(e) => {
-                    const files = Array.from(e.target.files || []) as File[];
-                    files.forEach(f => {
-                    const r = new FileReader();
-                    r.onload = () => setAttachments(p => [...p, { type: 'text', name: f.name, content: r.result as string }]);
-                    r.readAsText(f);
-                    });
-                }} />
-                
-                <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-gray-400 hover:text-white transition-colors mb-0.5"><Paperclip className="w-5 h-5" /></button>
-                
-                {processingMessage && isLocalProcessing ? (
-                    <>
-                        <div className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2.5 text-sm text-gray-400 opacity-70 cursor-not-allowed">
-                            Aguarde a resposta da IA...
-                        </div>
-                        
-                        <button 
-                        type="submit" 
-                        disabled={!input.trim()} 
-                        className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 border border-gray-600 disabled:opacity-50"
-                        title="Adicionar à Fila"
-                        >
-                        <ListPlus className="w-4 h-4" />
-                        </button>
-                    </>
-                ) : (
-                    <>
-                        <textarea
-                            ref={textareaRef}
-                            value={input} 
-                            onChange={e => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder="Instrua o Agente... (Shift+Enter para nova linha)" 
-                            rows={1}
-                            className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-mc-accent resize-none custom-scrollbar min-h-[42px] max-h-[150px]" 
-                        />
-                        <button 
-                        type="submit" 
-                        disabled={!input.trim() && attachments.length === 0} 
-                        className="bg-mc-accent hover:bg-blue-600 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed h-[42px] mb-[1px]"
-                        >
-                        <Send className="w-4 h-4 text-white" />
-                        </button>
-                    </>
-                )}
-                </form>
+                <button 
+                type="submit" 
+                disabled={!input.trim()} 
+                className="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 border border-gray-600 disabled:opacity-50"
+                title="Adicionar à Fila"
+                >
+                <ListPlus className="w-4 h-4" />
+                </button>
             </>
         ) : (
-             /* MODO ESPECTADOR: SOMENTE LEITURA */
-             <div className="flex items-center justify-center gap-2 p-3 bg-gray-800/50 rounded-lg border border-gray-700 text-gray-400 text-xs italic">
-                 <Eye className="w-4 h-4" />
-                 Você está visualizando o chat de {threadList.find(t => t.id === activeThreadId)?.label}. (Somente Leitura)
-             </div>
+            <>
+                <textarea
+                    ref={textareaRef}
+                    value={input} 
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Instrua seu Agente... (Shift+Enter para nova linha)" 
+                    rows={1}
+                    className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-mc-accent resize-none custom-scrollbar min-h-[42px] max-h-[150px]" 
+                />
+                <button 
+                type="submit" 
+                disabled={!input.trim() && attachments.length === 0} 
+                className="bg-mc-accent hover:bg-blue-600 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed h-[42px] mb-[1px]"
+                >
+                <Send className="w-4 h-4 text-white" />
+                </button>
+            </>
         )}
+        </form>
       </div>
     </div>
   );
