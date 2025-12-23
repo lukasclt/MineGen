@@ -35,6 +35,7 @@ const App: React.FC = () => {
   const isReadingRef = useRef(false); 
   const isWritingRef = useRef(false);
   const lastSavedStateRef = useRef<string>('');
+  const saveTimeoutRef = useRef<any>(null);
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
   const isBackendConnected = !!((process.env as any).API_URL || true); 
@@ -96,8 +97,8 @@ const App: React.FC = () => {
 
 
   const syncWithCloud = async (userId: string) => {
-    // TRAVA: Se estamos enviando dados (ex: limpando chat), NÃO leia da nuvem agora.
-    // Isso garante que a versão vazia local sobrescreva a versão cheia da nuvem.
+    // TRAVA: Se estamos enviando dados (ex: limpando chat, digitando), NÃO leia da nuvem agora.
+    // Isso garante que a versão local (que está sendo editada) não seja sobrescrita pela versão antiga da nuvem antes de salvar.
     if (isWritingRef.current) return;
     
     isReadingRef.current = true;
@@ -201,8 +202,8 @@ const App: React.FC = () => {
     };
   }, [currentUser, incomingInvite, currentProjectId]); 
 
-  // PUSH REATIVO IMEDIATO (ONE-BY-ONE)
-  // Dispara SEMPRE que 'activeProject' muda (ex: setMessages, setSettings)
+  // PUSH REATIVO COM DEBOUNCE DE 3 SEGUNDOS
+  // Dispara SEMPRE que 'activeProject' muda, mas espera 3s antes de enviar
   useEffect(() => {
     if (isLoaded) {
       if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
@@ -223,23 +224,28 @@ const App: React.FC = () => {
 
             // Se o estado mudou em relação ao último salvo...
             if (currentStateStr !== lastSavedStateRef.current) {
-                lastSavedStateRef.current = currentStateStr;
-                
-                // 1. Bloqueia leitura (Somos a autoridade agora)
+                // 1. Bloqueia leitura (Somos a autoridade enquanto editamos)
                 isWritingRef.current = true;
-                setIsCloudSyncing(true);
+                
+                // 2. Limpa o timer anterior se houver (Debounce)
+                if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
-                // 2. Envia IMEDIATAMENTE (Sem debounce, um por um)
-                dbService.saveProject(activeProject)
-                    .then(() => {
-                        // Sucesso
-                    })
-                    .catch(e => console.warn("Erro ao salvar:", e))
-                    .finally(() => {
-                        // 3. Libera leitura imediatamente após o envio
-                        isWritingRef.current = false;
-                        setIsCloudSyncing(false);
-                    });
+                // 3. Define novo timer de 3 segundos
+                saveTimeoutRef.current = setTimeout(() => {
+                    setIsCloudSyncing(true);
+                    
+                    dbService.saveProject(activeProject)
+                        .then(() => {
+                            lastSavedStateRef.current = currentStateStr;
+                        })
+                        .catch(e => console.warn("Erro ao salvar:", e))
+                        .finally(() => {
+                            // 4. Libera leitura após o envio completo
+                            isWritingRef.current = false;
+                            setIsCloudSyncing(false);
+                            saveTimeoutRef.current = null;
+                        });
+                }, 3000); // ATRASO DE 3 SEGUNDOS
             }
         }
       } else {

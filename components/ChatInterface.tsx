@@ -116,8 +116,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
      return list;
   }, [fullProject, messages, currentUser]);
 
-  // Permissão de escrita: Posso escrever se for meu chat OU se eu for o dono
-  const canWrite = (currentUser && activeThreadId === currentUser.id) || isOwner;
+  // Permissão de escrita: Posso escrever APENAS se for minha própria thread.
+  // Se for Admin vendo outro, "isOwner" não dá mais permissão de escrita, apenas leitura.
+  const canWrite = (currentUser && activeThreadId === currentUser.id);
 
   // Auto-resize do Textarea
   useEffect(() => {
@@ -184,7 +185,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   useEffect(() => {
     if (pendingMessage) {
-        // Se eu não puder escrever na thread atual (ex: sou membro vendo outro membro - teoricamente impossível com filtro), forço minha thread
+        // Se eu não puder escrever na thread atual (ex: sou membro vendo outro membro), forço minha thread
         if (currentUser && !canWrite) {
             setActiveThreadId(currentUser.id);
         }
