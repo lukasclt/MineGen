@@ -34,6 +34,8 @@ const App: React.FC = () => {
   // Controle de Concorrência
   const isReadingRef = useRef(false); 
   const isWritingRef = useRef(false);
+  // Novo: Ref para saber se a IA está gerando localmente, bloqueando updates externos
+  const isAiGeneratingRef = useRef(false);
   const lastSavedStateRef = useRef<string>('');
   
   const activeProject = projects.find(p => p.id === currentProjectId) || null;
@@ -96,8 +98,9 @@ const App: React.FC = () => {
 
 
   const syncWithCloud = async (userId: string) => {
-    // TRAVA: Se estamos enviando dados, NÃO leia da nuvem agora.
-    if (isWritingRef.current) return;
+    // TRAVA CRÍTICA: Se estamos escrevendo OU se a IA está gerando, não puxa dados da nuvem.
+    // Isso impede que a mensagem de "Gerando..." ou o resultado final sejam sobrescritos por um estado antigo da nuvem.
+    if (isWritingRef.current || isAiGeneratingRef.current) return;
     
     isReadingRef.current = true;
     
@@ -106,7 +109,8 @@ const App: React.FC = () => {
         
         if (cloudProjects.length > 0) {
           setProjects(prevLocal => {
-            if (isWritingRef.current) return prevLocal;
+            // Verificação dupla de segurança
+            if (isWritingRef.current || isAiGeneratingRef.current) return prevLocal;
 
             const merged = [...prevLocal];
             const sanitizedCloud = cloudProjects.map(p => ({
@@ -534,6 +538,8 @@ const App: React.FC = () => {
               directoryHandle={directoryHandle} onSetDirectoryHandle={setDirectoryHandle}
               pendingMessage={pendingAiMessage} onClearPendingMessage={() => setPendingAiMessage(null)}
               currentUser={currentUser}
+              onAiGenerationStart={() => isAiGeneratingRef.current = true}
+              onAiGenerationEnd={() => isAiGeneratingRef.current = false}
             />
           ) : (
              <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">

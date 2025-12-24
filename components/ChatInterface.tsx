@@ -18,6 +18,9 @@ interface ChatInterfaceProps {
   pendingMessage?: string | null;
   onClearPendingMessage?: () => void;
   currentUser: User | null;
+  // Novos props para travar a sync externa
+  onAiGenerationStart?: () => void;
+  onAiGenerationEnd?: () => void;
 }
 
 const REASONING_STEPS = [
@@ -34,7 +37,8 @@ const TIMEOUT_DURATION = 300; // 5 minutos em segundos
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   settings, messages, setMessages, currentProject, fullProject, onProjectGenerated, 
-  directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser
+  directoryHandle, onSetDirectoryHandle, pendingMessage, onClearPendingMessage, currentUser,
+  onAiGenerationStart, onAiGenerationEnd
 }) => {
   const [input, setInput] = useState('');
   const [isLocalProcessing, setIsLocalProcessing] = useState(false);
@@ -161,6 +165,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     if (!isRetry) {
         setIsLocalProcessing(true);
         setProgressValue(0); 
+        // Avisa a App para pausar sync
+        if (onAiGenerationStart) onAiGenerationStart();
     }
     
     setTimeLeft(TIMEOUT_DURATION);
@@ -225,6 +231,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                  status: 'done' 
              } : m));
              setIsLocalProcessing(false);
+             // Libera sync
+             if (onAiGenerationEnd) onAiGenerationEnd();
              return;
           }
           setTimeout(() => {
@@ -242,6 +250,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
       if (settings.enableSounds) playSound('error');
       setIsLocalProcessing(false);
+    } finally {
+       // Garante que a sync seja liberada no final
+       if (onAiGenerationEnd) onAiGenerationEnd();
     }
   };
 
@@ -250,6 +261,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
           abortControllerRef.current.abort();
           setIsLocalProcessing(false);
           playSound('click');
+          if (onAiGenerationEnd) onAiGenerationEnd();
       }
   };
 
