@@ -15,16 +15,22 @@ export enum JavaVersion {
 }
 
 export enum BuildSystem {
-  MAVEN = 'Maven',
-  GRADLE = 'Gradle'
+  GRADLE = 'Gradle',
+  MAVEN = 'Maven'
+}
+
+export enum AIProvider {
+  OPENROUTER = 'OpenRouter',
+  GITHUB_COPILOT = 'GitHub Copilot'
 }
 
 export interface User {
-  id: string;
+  id: string; // GitHub Login
   username: string;
-  email: string;
   avatarUrl?: string;
-  savedApiKey?: string; // Chave persistida na conta
+  githubToken: string; // Token PAT
+  email?: string;
+  savedApiKey?: string;
 }
 
 export interface PluginSettings {
@@ -36,9 +42,10 @@ export interface PluginSettings {
   mcVersion: string;
   javaVersion: JavaVersion;
   buildSystem: BuildSystem;
+  aiProvider: AIProvider; // Novo campo
   description: string;
   author: string;
-  aiModel: string; // Modelo selecionado
+  aiModel: string;
   aiUrl: string;
   enableSounds: boolean;
   enableTTS: boolean;
@@ -52,6 +59,8 @@ export interface GeneratedFile {
 
 export interface GeneratedProject {
   explanation: string;
+  commitTitle: string; 
+  commitDescription: string; 
   files: GeneratedFile[];
 }
 
@@ -63,7 +72,7 @@ export interface Attachment {
 
 export interface ChatMessage {
   id?: string;
-  threadId?: string; // ID do dono desta conversa (Novo)
+  threadId?: string;
   role: 'user' | 'model';
   senderId?: string;
   senderName?: string;
@@ -72,23 +81,38 @@ export interface ChatMessage {
   projectData?: GeneratedProject; 
   isError?: boolean;
   status?: 'queued' | 'processing' | 'done';
-  timestamp?: number; // Adicionado para sincronização de timer
+  timestamp?: number;
+}
+
+export interface GitHubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  html_url: string;
+  description: string;
+  owner: {
+    login: string;
+    avatar_url: string;
+  };
+  default_branch: string;
+  updated_at: string;
+}
+
+export interface ProjectState {
+  repo: GitHubRepo;
+  settings: PluginSettings;
+  messages: ChatMessage[];
+  files: GeneratedFile[];
+  lastBuildStatus?: 'success' | 'failure' | 'pending' | null;
+  currentActionRunId?: number;
 }
 
 export interface SavedProject {
   id: string;
-  name: string;
-  ownerId: string;
-  ownerName?: string; // Adicionado para exibir o nome do dono
-  members: string[];
-  lastModified: number;
-  settings: PluginSettings;
-  messages: ChatMessage[];
-  generatedProject: GeneratedProject | null;
-}
-
-export interface GitHubSettings {
-  token: string;
-  username: string;
-  repoName: string;
+  ownerId?: string;
+  name?: string;
+  members?: string[];
+  lastModified?: number;
+  files?: GeneratedFile[];
+  settings?: PluginSettings;
 }

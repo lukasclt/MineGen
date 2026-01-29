@@ -110,6 +110,7 @@ export const dbService = {
             id: 'local-' + Math.random().toString(36).substr(2, 9),
             username: userData.username!,
             email: userData.email!,
+            githubToken: userData.githubToken!,
             savedApiKey: userData.savedApiKey
         };
         LocalDB.saveUser(newUser);
@@ -187,7 +188,7 @@ export const dbService = {
         // Filtra projetos onde o usuário é dono OU membro
         const user = LocalDB.getUsers().find(u => u.id === userId);
         const email = user ? user.email : '';
-        return LocalDB.getProjects().filter(p => p.ownerId === userId || (p.members && p.members.includes(email)));
+        return LocalDB.getProjects().filter(p => p.ownerId === userId || (p.members && email && p.members.includes(email)));
       }
     );
   },

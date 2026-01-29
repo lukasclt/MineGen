@@ -1,5 +1,5 @@
 
-import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User } from "../types";
+import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User, AIProvider } from "../types";
 import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
 /**
@@ -39,7 +39,7 @@ function extractJson(text: string): any {
 }
 
 /**
- * Serviço de integração com OpenRouter (API Unificada)
+ * Serviço de integração com OpenRouter (API Unificada) ou GitHub Models
  */
 export const generatePluginCode = async (
   prompt: string, 
@@ -50,13 +50,25 @@ export const generatePluginCode = async (
   signal?: AbortSignal // Adicionado suporte a sinal de cancelamento
 ): Promise<GeneratedProject> => {
   
-  const baseUrl = 'https://openrouter.ai/api/v1';
-  
-  // Prioridade: Chave salva no Perfil > Chave de Ambiente
-  const apiKey = currentUser?.savedApiKey || process.env.API_KEY;
+  // CONFIGURAÇÃO DO PROVIDER
+  let baseUrl = 'https://openrouter.ai/api/v1';
+  let apiKey = '';
+  let providerHeader = {};
 
-  if (!apiKey) {
-    throw new Error("API Key não encontrada. Configure-a no seu Perfil (clique no avatar) ou no ambiente.");
+  if (settings.aiProvider === AIProvider.GITHUB_COPILOT) {
+      // Endpoint padrão para GitHub Models (via Azure AI Inference ou GitHub Gateway)
+      baseUrl = 'https://models.inference.ai.azure.com';
+      apiKey = currentUser?.githubToken || '';
+      if (!apiKey) throw new Error("Token do GitHub não encontrado. Faça login novamente.");
+  } else {
+      // OpenRouter Padrão
+      baseUrl = 'https://openrouter.ai/api/v1';
+      apiKey = currentUser?.savedApiKey || process.env.API_KEY || '';
+      if (!apiKey) throw new Error("API Key do OpenRouter não encontrada. Configure-a no seu Perfil.");
+      providerHeader = {
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'MineGen AI Cloud',
+      };
   }
 
   let userPromptContext = "";
@@ -67,10 +79,21 @@ export const generatePluginCode = async (
 - **Project Name**: ${settings.name}
 - **Target Platform**: ${settings.platform}
 - **Minecraft Version**: ${settings.mcVersion}
-- **Java Version**: ${settings.javaVersion}
+- **Java Version**: ${settings.javaVersion} (STRICT REQUIREMENT for Gradle)
 - **Build System**: ${settings.buildSystem}
 - **Group ID**: ${settings.groupId}
 - **Artifact ID**: ${settings.artifactId}
+
+# GRADLE CONFIGURATION RULE
+You MUST configure the 'build.gradle' file to explicitly use **Java ${settings.javaVersion}**.
+Example for Java 17:
+\`\`\`groovy
+java {
+    toolchain.languageVersion.set(JavaLanguageVersion.of(17))
+}
+\`\`\`
+Or strict sourceCompatibility = '17' if toolchains are not used. 
+Ensure the build task is compatible with the GitHub Actions runner using Java ${settings.javaVersion}.
   `;
 
   if (previousProject && previousProject.files.length > 0) {
@@ -131,23 +154,23 @@ ${prompt}
   });
 
   try {
-    console.log(`[AI] Enviando requisição para modelo: ${settings.aiModel}`);
+    console.log(`[AI] Enviando requisição para provider: ${settings.aiProvider}, modelo: ${settings.aiModel}`);
     
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'MineGen AI Cloud',
+        ...providerHeader
       },
       body: JSON.stringify({
-        model: settings.aiModel || "google/gemini-2.0-flash-exp:free",
+        model: settings.aiModel,
         messages: [
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: contentArray }
         ],
-        response_format: settings.aiModel?.includes('gpt') || settings.aiModel?.includes('gemini') ? { type: "json_object" } : undefined,
+        // GitHub Models não suporta response_format json_object em todos os modelos, então enviamos apenas se for GPT/Gemini
+        response_format: (settings.aiModel?.includes('gpt') || settings.aiModel?.includes('gemini')) ? { type: "json_object" } : undefined,
         temperature: 0.2, // Baixa temperatura para código preciso
         max_tokens: 8192, // Permitir respostas longas para projetos complexos
       }),
@@ -163,7 +186,7 @@ ${prompt}
       } catch {
         errorMsg = errorText || errorMsg;
       }
-      throw new Error(`OpenRouter Error: ${errorMsg}`);
+      throw new Error(`AI Provider Error: ${errorMsg}`);
     }
 
     const data = await response.json();
@@ -201,6 +224,6 @@ ${prompt}
         throw new Error("TIMEOUT");
     }
     console.error("AI Generation Error Completo:", e);
-    throw new Error(e.message || "Falha na comunicação com OpenRouter.");
+    throw new Error(e.message || "Falha na comunicação com o Provider de IA.");
   }
 };

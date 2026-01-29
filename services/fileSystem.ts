@@ -129,6 +129,8 @@ export const readProjectFromDisk = async (directoryHandle: any): Promise<Generat
 
   return {
     explanation: "Projeto carregado do disco.",
+    commitTitle: "Load from Disk",
+    commitDescription: "Loaded from local file system",
     files: files
   };
 };

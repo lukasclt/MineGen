@@ -1,211 +1,104 @@
 
-import React, { useState, useEffect } from 'react';
-import { X, Mail, Lock, User as UserIcon, LogIn, UserPlus, ShieldCheck, Key, Eye, EyeOff, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Github, Key, Check, ShieldAlert, ExternalLink, Loader2 } from 'lucide-react';
 import { User } from '../types';
-import { dbService } from '../services/dbService';
+import { getAuthenticatedUser } from '../services/githubService';
 
 interface AuthModalProps {
   isOpen: boolean;
-  onClose: () => void;
   onAuthSuccess: (user: User) => void;
-  initialUser?: User | null;
-  canClose?: boolean; // Novo prop para login obrigatório
 }
 
-const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onAuthSuccess, initialUser, canClose = true }) => {
-  const [mode, setMode] = useState<'login' | 'register' | 'profile'>(initialUser ? 'profile' : 'login');
-  const [email, setEmail] = useState(initialUser?.email || '');
-  const [password, setPassword] = useState('');
-  const [username, setUsername] = useState(initialUser?.username || '');
-  const [apiKey, setApiKey] = useState(initialUser?.savedApiKey || '');
-  const [showKey, setShowKey] = useState(false);
-  const [error, setError] = useState('');
+const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onAuthSuccess }) => {
+  const [token, setToken] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    if (initialUser) {
-      setMode('profile');
-      setEmail(initialUser.email);
-      setUsername(initialUser.username);
-      setApiKey(initialUser.savedApiKey || '');
-    } else if (!canClose) {
-      setMode('login'); // Força login se for modal de bloqueio
-    }
-  }, [initialUser, isOpen, canClose]);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    if (!token.trim()) return;
+
     setIsLoading(true);
+    setError('');
 
     try {
-      if (mode === 'login') {
-        if (!email || !password) throw new Error('E-mail e senha são obrigatórios.');
-        
-        const user = await dbService.loginUser(email, password);
-        onAuthSuccess(user);
-        if (canClose) onClose();
-
-      } else if (mode === 'register') {
-        if (!email || !password || !username) throw new Error('Todos os campos são obrigatórios.');
-        
-        const newUser: Partial<User> = { username, email, savedApiKey: apiKey };
-        const user = await dbService.registerUser(newUser, password);
-        onAuthSuccess(user);
-        if (canClose) onClose();
-
-      } else if (mode === 'profile') {
-        if (!initialUser) return;
-        
-        const updatedUser: User = { 
-          ...initialUser, 
-          username, 
-          savedApiKey: apiKey 
-        };
-        const finalUser = await dbService.updateUser(updatedUser);
-        onAuthSuccess(finalUser);
-        if (canClose) onClose();
-      }
+      const githubUser = await getAuthenticatedUser(token);
+      
+      const user: User = {
+        id: githubUser.login,
+        username: githubUser.login,
+        avatarUrl: githubUser.avatar_url,
+        githubToken: token
+      };
+      
+      onAuthSuccess(user);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Ocorreu um erro. Tente novamente.");
+      setError("Token inválido ou expirado. Verifique as permissões.");
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-mc-panel border border-gray-700 w-full max-w-md rounded-xl shadow-2xl overflow-hidden animate-slide-up">
-        <div className="p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              {mode === 'login' ? <LogIn className="text-mc-accent" /> : 
-               mode === 'register' ? <UserPlus className="text-mc-green" /> : 
-               <UserIcon className="text-mc-gold" />}
-              {mode === 'login' ? 'Acessar Conta' : 
-               mode === 'register' ? 'Criar Nova Conta' : 
-               'Perfil do Desenvolvedor'}
-            </h2>
-            {canClose && (
-              <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-            )}
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {(mode === 'register' || mode === 'profile') && (
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Nome de Usuário</label>
-                <div className="relative">
-                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-white focus:border-mc-accent outline-none"
-                    placeholder="Seu nome"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">E-mail</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <input
-                  type="email"
-                  value={email}
-                  disabled={mode === 'profile'}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-white focus:border-mc-accent outline-none disabled:opacity-50"
-                  placeholder="exemplo@email.com"
-                />
-              </div>
-            </div>
-
-            {mode !== 'profile' && (
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase mb-1">Senha</label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-white focus:border-mc-accent outline-none"
-                    placeholder="••••••••"
-                  />
-                </div>
-              </div>
-            )}
-
-            <div className="pt-2 border-t border-gray-800">
-              <label className="block text-xs font-bold text-mc-gold uppercase mb-1 flex items-center gap-1.5">
-                <Key className="w-3 h-3" /> OpenRouter API Key
-              </label>
-              <div className="relative">
-                <input
-                  type={showKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 pl-4 pr-10 text-white font-mono text-xs focus:border-mc-gold outline-none"
-                  placeholder="sk-or-v1-..."
-                />
-                <button 
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
-                >
-                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              <p className="text-[9px] text-gray-500 mt-1 italic">Sua chave é salva apenas neste navegador (ou no banco se logado).</p>
-            </div>
-
-            {error && (
-              <div className="text-red-400 text-xs py-2 px-3 bg-red-900/20 border border-red-500/30 rounded flex items-center gap-2">
-                <ShieldCheck className="w-3 h-3" /> {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className={`w-full py-3 rounded-lg font-bold text-white shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${mode === 'login' ? 'bg-mc-accent hover:bg-blue-600' : mode === 'register' ? 'bg-mc-green hover:bg-green-600' : 'bg-gray-700 hover:bg-gray-600'}`}
-            >
-              {isLoading ? (
-                <>
-                   <Loader2 className="w-4 h-4 animate-spin" /> Processando...
-                </>
-              ) : (
-                 mode === 'login' ? 'Entrar' : mode === 'register' ? 'Registrar Agora' : 'Salvar Alterações'
-              )}
-            </button>
-          </form>
-
-          {mode !== 'profile' && (
-            <div className="mt-6 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                   setMode(mode === 'login' ? 'register' : 'login');
-                   setError('');
-                }}
-                className="text-sm text-gray-400 hover:text-mc-accent transition-colors underline"
-              >
-                {mode === 'login' ? 'Não tem uma conta? Registre-se' : 'Já possui conta? Faça login'}
-              </button>
-            </div>
-          )}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
+      <div className="bg-[#1e1e1e] border border-gray-700 w-full max-w-md rounded-xl shadow-2xl overflow-hidden animate-slide-up">
+        <div className="p-6 bg-[#252526] border-b border-[#333]">
+           <div className="flex justify-center mb-4">
+               <Github className="w-12 h-12 text-white" />
+           </div>
+           <h2 className="text-xl font-bold text-center text-white">Login com GitHub</h2>
+           <p className="text-xs text-center text-gray-400 mt-2">
+             O MineGen AI precisa de acesso ao seu GitHub para criar repositórios, commitar código e verificar builds.
+           </p>
         </div>
 
-        <div className="bg-black/20 p-4 text-[10px] text-gray-500 flex items-center justify-center gap-2 border-t border-gray-700">
-          <ShieldCheck className="w-3 h-3" /> MineGen AI utiliza Vercel Blob para autenticação.
+        <div className="p-6 space-y-4">
+            <div className="bg-blue-900/20 border border-blue-500/30 p-3 rounded text-[11px] text-blue-200">
+               <strong className="block mb-1 flex items-center gap-1"><ShieldAlert className="w-3 h-3" /> Requisitos do Token:</strong>
+               Crie um <strong>Personal Access Token (Classic)</strong> com os escopos:
+               <ul className="list-disc pl-4 mt-1 text-gray-300">
+                   <li><code>repo</code> (Full control of private repositories)</li>
+                   <li><code>workflow</code> (Update GitHub Action workflows)</li>
+               </ul>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                   <label className="text-xs font-bold text-gray-500 uppercase">GitHub Personal Access Token</label>
+                   <div className="relative mt-1">
+                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                      <input 
+                        type="password" 
+                        value={token}
+                        onChange={e => setToken(e.target.value)}
+                        placeholder="ghp_xxxxxxxxxxxx"
+                        className="w-full bg-black/30 border border-gray-600 rounded-lg py-2.5 pl-10 text-white focus:border-mc-green outline-none font-mono text-sm"
+                      />
+                   </div>
+                </div>
+
+                {error && <div className="text-red-400 text-xs text-center bg-red-900/20 p-2 rounded border border-red-500/30">{error}</div>}
+
+                <button 
+                  type="submit" 
+                  disabled={isLoading || !token}
+                  className="w-full bg-mc-green hover:bg-green-600 text-black font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                   {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                   {isLoading ? 'Verificando...' : 'Conectar GitHub'}
+                </button>
+            </form>
+
+            <a 
+              href="https://github.com/settings/tokens/new?scopes=repo,workflow&description=MineGen+AI+Access" 
+              target="_blank" 
+              rel="noreferrer"
+              className="block text-center text-xs text-gray-500 hover:text-white underline flex items-center justify-center gap-1"
+            >
+               Gerar Token Rapidamente <ExternalLink className="w-3 h-3" />
+            </a>
         </div>
       </div>
     </div>

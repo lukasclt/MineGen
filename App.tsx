@@ -1,598 +1,242 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Menu, TerminalSquare, Cloud, CloudOff, RefreshCw, Database, Check, X, FolderInput, AlertTriangle, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { PluginSettings, GeneratedProject, ChatMessage, User, GitHubRepo, GeneratedFile } from './types';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
 import Terminal from './components/Terminal';
 import AuthModal from './components/AuthModal';
-import { PluginSettings, GeneratedProject, SavedProject, ChatMessage, GeneratedFile, User } from './types';
-import { DEFAULT_SETTINGS } from './constants';
-import { saveDirectoryHandleToDB, getDirectoryHandleFromDB, getDirectoryHandle, readProjectFromDisk, detectProjectSettings, loadProjectStateFromDisk, saveProjectStateToDisk, verifyPermission, checkPermissionStatus, saveProjectToDisk } from './services/fileSystem';
-import { dbService, Invite } from './services/dbService';
+import { DEFAULT_SETTINGS, getGithubWorkflowYml } from './constants';
+import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo } from './services/githubService';
 import { playSound, speakText } from './services/audioService';
-
-const generateUUID = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => (Math.random() * 16 | (c === 'x' ? 0 : 0x8)).toString(16));
+import { generatePluginCode } from './services/geminiService';
 
 const App: React.FC = () => {
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => window.innerWidth > 768);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(true);
   
-  const [projects, setProjects] = useState<SavedProject[]>([]);
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [directoryHandle, setDirectoryHandle] = useState<any>(null);
-  const [hasFilePermission, setHasFilePermission] = useState<boolean>(false);
+  const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [currentRepo, setCurrentRepo] = useState<GitHubRepo | null>(null);
+  const [isLoadingRepos, setIsLoadingRepos] = useState(false);
   
-  const [isTerminalOpen, setIsTerminalOpen] = useState(true);
+  const [projectData, setProjectData] = useState<GeneratedProject | null>(null); // Conteúdo atual (em memória)
+  const [settings, setSettings] = useState<PluginSettings>(DEFAULT_SETTINGS);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
-  const [pendingAiMessage, setPendingAiMessage] = useState<string | null>(null);
-  const [incomingInvite, setIncomingInvite] = useState<Invite | null>(null);
   
-  // Controle de Concorrência
-  const isReadingRef = useRef(false); 
-  const isWritingRef = useRef(false);
-  // Novo: Ref para saber se a IA está gerando localmente, bloqueando updates externos
-  const isAiGeneratingRef = useRef(false);
-  const lastSavedStateRef = useRef<string>('');
-  
-  const activeProject = projects.find(p => p.id === currentProjectId) || null;
-  const isBackendConnected = !!((process.env as any).API_URL || true); 
+  // Build Loop State
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [lastRunId, setLastRunId] = useState<number | null>(null);
 
-  const addLog = (m: string) => setTerminalLogs(prev => [...prev, m]);
+  const addLog = (msg: string) => setTerminalLogs(prev => [...prev, msg]);
 
+  // Carrega usuário do LocalStorage
   useEffect(() => {
-    const init = async () => {
-      try {
-        const savedUser = localStorage.getItem('minegen_user');
-        const cachedProjects = localStorage.getItem('minegen_projects');
-        
-        if (cachedProjects) {
-          try {
-            const parsedProjects = JSON.parse(cachedProjects);
-            setProjects(parsedProjects);
-            addLog("Sistema: Projetos carregados do cache local.");
-          } catch (e) {
-            console.error("Cache inválido", e);
-          }
-        }
-
-        const savedLastId = localStorage.getItem('minegen_last_project_id');
-        if (savedLastId) setCurrentProjectId(savedLastId);
-
-        if (savedUser) {
-          const user = JSON.parse(savedUser);
-          setCurrentUser(user);
-          // Sync inicial
-          await syncWithCloud(user.id);
-          checkInviteLink(user);
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsLoaded(true);
-      }
-    };
-    init();
+     const saved = localStorage.getItem('minegen_user_github');
+     if (saved) {
+         setCurrentUser(JSON.parse(saved));
+         setIsAuthOpen(false);
+     }
   }, []);
 
-  // CORREÇÃO AUTOMÁTICA DE NOME DO DONO
+  // Busca repositórios ao logar
   useEffect(() => {
-    if (!currentUser || projects.length === 0 || !isLoaded) return;
-    
-    let changed = false;
-    const updatedProjects = projects.map(p => {
-        if (p.ownerId === currentUser.id && p.ownerName !== currentUser.username) {
-            changed = true;
-            const updated = { ...p, ownerName: currentUser.username };
-            dbService.saveProject(updated).catch(() => {});
-            return updated;
-        }
-        return p;
-    });
+     if (currentUser) {
+         localStorage.setItem('minegen_user_github', JSON.stringify(currentUser));
+         refreshRepos();
+     }
+  }, [currentUser]);
 
-    if (changed) setProjects(updatedProjects);
-  }, [currentUser, projects.length, isLoaded]);
-
-
-  const syncWithCloud = async (userId: string) => {
-    // TRAVA CRÍTICA: Se estamos escrevendo OU se a IA está gerando, não puxa dados da nuvem.
-    // Isso impede que a mensagem de "Gerando..." ou o resultado final sejam sobrescritos por um estado antigo da nuvem.
-    if (isWritingRef.current || isAiGeneratingRef.current) return;
-    
-    isReadingRef.current = true;
-    
-    try {
-        const cloudProjects = await dbService.loadUserProjects(userId);
-        
-        if (cloudProjects.length > 0) {
-          setProjects(prevLocal => {
-            // Verificação dupla de segurança
-            if (isWritingRef.current || isAiGeneratingRef.current) return prevLocal;
-
-            const merged = [...prevLocal];
-            const sanitizedCloud = cloudProjects.map(p => ({
-                ...p, 
-                members: p.members || [],
-                ownerName: p.ownerName || 'Desconhecido' 
-            }));
-
-            let hasChanges = false;
-            let externalUpdateDetected = false;
-
-            sanitizedCloud.forEach(cloudP => {
-              const localIdx = merged.findIndex(p => p.id === cloudP.id);
-              if (localIdx === -1) {
-                merged.push(cloudP);
-                hasChanges = true;
-              } else {
-                const localP = merged[localIdx];
-                
-                // Se a versão da nuvem é mais nova que a local, alguém editou!
-                if (cloudP.lastModified > localP.lastModified) {
-                    merged[localIdx] = cloudP; // Substituição completa
-                    hasChanges = true;
-                    // Detecta se é o projeto ativo e se realmente mudou conteúdo
-                    if (currentProjectId === cloudP.id) {
-                        externalUpdateDetected = true;
-                    }
-                }
-              }
-            });
-
-            if (externalUpdateDetected) {
-                // Toca som se alguém fez alteração (colaboração em tempo real)
-                playSound('message'); 
-            }
-
-            return hasChanges ? merged : prevLocal;
-          });
-        }
-    } catch (e) {
-        // Silently fail on network glitches
-    } finally {
-        isReadingRef.current = false;
-    }
-  };
-
-  const checkInviteLink = async (user: User) => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const inviteToken = urlParams.get('invite');
-      if (inviteToken) {
-          try {
-              addLog("Sistema: Processando link de convite...");
-              const project = await dbService.joinProjectByLink(inviteToken, user.email);
-              setProjects(prev => {
-                  if (prev.find(p => p.id === project.id)) return prev;
-                  return [project, ...prev];
-              });
-              setCurrentProjectId(project.id);
-              playSound('success');
-              addLog(`Sistema: Você entrou no projeto ${project.name} via link!`);
-              window.history.replaceState({}, document.title, window.location.pathname);
-          } catch (e: any) {
-              addLog(`Erro Convite: ${e.message}`);
-              playSound('error');
-          }
-      }
-  };
-
-  // LOOP DE LEITURA (HEARTBEAT DE ALTA FREQUÊNCIA)
-  // Verifica se outros administradores mudaram algo a cada 500ms
-  useEffect(() => {
-    if (!currentUser) return;
-    
-    const syncIntervalTime = currentProjectId ? 500 : 3000; 
-
-    const syncLoop = async () => {
-        if (!document.hidden) { 
-            await syncWithCloud(currentUser.id);
-        }
-    };
-
-    const checkInvites = async () => {
-      const invites = await dbService.checkPendingInvites(currentUser.email);
-      if (invites.length > 0 && !incomingInvite) {
-        const invite = invites[0];
-        setIncomingInvite(invite);
-        playSound('message');
-        speakText(`Você tem um novo convite de ${invite.senderName} para o projeto ${invite.projectName}`);
-      }
-    };
-
-    const intervalSync = setInterval(syncLoop, syncIntervalTime);
-    const intervalInvite = setInterval(checkInvites, 5000);
-
-    return () => {
-        clearInterval(intervalSync);
-        clearInterval(intervalInvite);
-    };
-  }, [currentUser, incomingInvite, currentProjectId]); 
-
-  // PUSH REATIVO SEM DELAY (INSTANTÂNEO)
-  // Dispara SEMPRE que 'activeProject' muda
-  useEffect(() => {
-    if (isLoaded) {
-      if (currentProjectId) localStorage.setItem('minegen_last_project_id', currentProjectId);
-      localStorage.setItem('minegen_projects', JSON.stringify(projects));
-      
-      if (currentUser) {
-        localStorage.setItem('minegen_user', JSON.stringify(currentUser));
-        
-        if (activeProject) {
-            // Cria um hash do estado atual
-            const currentStateStr = JSON.stringify({
-                msgs: activeProject.messages.length,
-                msgsTimestamp: activeProject.messages.length > 0 ? activeProject.messages[activeProject.messages.length-1].timestamp : 0,
-                lastMod: activeProject.lastModified, 
-                settings: activeProject.settings,
-                codeHash: activeProject.generatedProject?.files.length
-            });
-
-            // Se o estado mudou em relação ao último salvo...
-            if (currentStateStr !== lastSavedStateRef.current) {
-                // 1. Bloqueia leitura (Somos a autoridade enquanto editamos)
-                isWritingRef.current = true;
-                
-                // 2. Envia imediatamente (SEM TIMEOUT)
-                setIsCloudSyncing(true);
-                
-                dbService.saveProject(activeProject)
-                    .then(() => {
-                        lastSavedStateRef.current = currentStateStr;
-                    })
-                    .catch(e => console.warn("Erro ao salvar:", e))
-                    .finally(() => {
-                        isWritingRef.current = false;
-                        setIsCloudSyncing(false);
-                    });
-            }
-        }
-      } else {
-        localStorage.removeItem('minegen_user');
-      }
-    }
-  }, [projects, currentUser, isLoaded, currentProjectId, activeProject]);
-
-  useEffect(() => {
-    const loadHandle = async () => {
-      setDirectoryHandle(null);
-      setHasFilePermission(false);
-
-      if (currentProjectId) {
-        const saved = await getDirectoryHandleFromDB(currentProjectId);
-        if (saved) {
-             setDirectoryHandle(saved);
-             const status = await checkPermissionStatus(saved);
-             setHasFilePermission(status === 'granted');
-        }
-      }
-    };
-    loadHandle();
-  }, [currentProjectId]);
-
-  // AUTO-SYNC STATE TO DISK (Local File System)
-  useEffect(() => {
-      if (!activeProject || !directoryHandle || !hasFilePermission) return;
-      
-      const timeoutId = setTimeout(async () => {
-          if (activeProject.generatedProject) {
-             try {
-                 await saveProjectToDisk(directoryHandle, activeProject.generatedProject);
-                 await saveProjectStateToDisk(directoryHandle, activeProject);
-             } catch (e) {
-                 console.warn("Falha no Auto-Save para o disco:", e);
-             }
-          }
-      }, 1000); 
-
-      return () => clearTimeout(timeoutId);
-  }, [activeProject, directoryHandle, hasFilePermission]);
-
-  const handleReconnectFolder = async () => {
-      if (!directoryHandle) return;
-      try {
-          const granted = await verifyPermission(directoryHandle, true);
-          if (granted) {
-              setHasFilePermission(true);
-              playSound('success');
-              addLog("Sistema: Pasta reconectada com sucesso.");
-          }
-      } catch (e) {
-          addLog("Erro ao reconectar pasta.");
-      }
-  };
-
-  const handleAuthSuccess = async (user: User) => {
-    setCurrentUser(user);
-    // Sync imediato ao logar
-    await syncWithCloud(user.id);
-    setIsAuthModalOpen(false);
-    addLog(`Sistema: Bem-vindo, ${user.username}!`);
-    playSound('success');
-    checkInviteLink(user);
-  };
-
-  const handleDeleteAccount = async () => {
-    if (!currentUser) return;
-    setIsCloudSyncing(true);
-    const success = await dbService.deleteUser(currentUser.id);
-    setIsCloudSyncing(false);
-    if (success) {
-      setCurrentUser(null);
-      setProjects([]);
-      setDirectoryHandle(null);
-      setCurrentProjectId(null);
-      localStorage.clear(); 
-      addLog("Sistema: Conta excluída.");
-      playSound('message');
-    } else {
-      addLog("Erro: Falha ao excluir conta.");
-      playSound('error');
-    }
-  };
-
-  const handleInvite = (email: string) => {
-    if (!activeProject) return;
-    setProjects(prev => prev.map(p => p.id === activeProject.id ? { ...p, members: [...(p.members || []), email] } : p));
-    addLog(`Sistema: Convite adicionado localmente para ${email}.`);
-  };
-
-  const handleRemoveMember = async (projectId: string, email: string) => {
+  const refreshRepos = async () => {
       if (!currentUser) return;
-      setIsCloudSyncing(true);
+      setIsLoadingRepos(true);
       try {
-          await dbService.removeMember(projectId, email, currentUser.id);
-          
-          if (email === currentUser.email) {
-              setProjects(prev => prev.filter(p => p.id !== projectId));
-              if (currentProjectId === projectId) setCurrentProjectId(null);
-              playSound('click');
-              addLog("Sistema: Você saiu do projeto.");
-          } else {
-              setProjects(prev => prev.map(p => {
-                  if (p.id === projectId) {
-                      return { ...p, members: p.members.filter(m => m !== email) };
-                  }
-                  return p;
-              }));
-              playSound('click');
-              addLog(`Sistema: Membro ${email} removido.`);
-          }
-      } catch (e: any) {
-          addLog(`Erro: ${e.message}`);
-          playSound('error');
+          const data = await getUserRepos(currentUser.githubToken);
+          setRepos(data);
+      } catch (e) {
+          addLog(`Erro ao buscar repos: ${e}`);
       } finally {
-          setIsCloudSyncing(false);
+          setIsLoadingRepos(false);
       }
   };
 
-  const handleRespondInvite = async (accept: boolean) => {
-    if (!incomingInvite) return;
-    setIsCloudSyncing(true);
-    try {
-      const project = await dbService.respondToInvite(incomingInvite.id, accept);
-      if (accept && project) {
-         const sanitized = { ...project, members: project.members || [] };
-         setProjects(prev => [sanitized, ...prev]);
-         setCurrentProjectId(sanitized.id);
-         playSound('success');
-         addLog(`Sistema: Você entrou no projeto ${project.name}.`);
-      } else if (!accept) {
-         addLog("Sistema: Convite recusado.");
+  const handleCreateRepo = async () => {
+      const name = prompt("Nome do Repositório:");
+      if (!name || !currentUser) return;
+      
+      try {
+          addLog("Criando repositório no GitHub...");
+          const newRepo = await createRepository(currentUser.githubToken, name, "MineGen AI Project");
+          setRepos(prev => [newRepo, ...prev]);
+          setCurrentRepo(newRepo);
+          
+          // Commit Inicial com Template e Versão Java Dinâmica
+          addLog(`Inicializando estrutura Gradle com Java ${settings.javaVersion} e Actions...`);
+          const initialFiles: GeneratedFile[] = [
+              { path: '.github/workflows/gradle.yml', content: getGithubWorkflowYml(settings.javaVersion), language: 'yaml' },
+              { path: 'README.md', content: `# ${name}\n\nGenerated by MineGen AI`, language: 'text' }
+          ];
+          
+          await commitToRepo(currentUser.githubToken, currentUser.username, name, initialFiles, "Initial commit", "Project scaffold");
+          setProjectData({ explanation: "Projeto Iniciado", commitTitle: "Init", commitDescription: "", files: initialFiles });
+          playSound('success');
+
+      } catch (e: any) {
+          alert("Erro: " + e.message);
       }
-    } catch (e) {
-      console.error(e);
-      addLog("Erro ao responder convite.");
-    } finally {
-      setIsCloudSyncing(false);
-      setIncomingInvite(null);
-    }
   };
 
-  const handleOpenOrNewProject = async () => {
-    try {
-      const handle = await getDirectoryHandle();
-      if (!handle) return; 
-      const existing = await loadProjectStateFromDisk(handle);
-      if (existing) {
-          const safeExisting = { ...existing, members: existing.members || [] };
-          setProjects(prev => {
-              const exists = prev.find(p => p.id === safeExisting.id);
-              if (exists) return prev.map(p => p.id === safeExisting.id ? safeExisting : p);
-              return [safeExisting, ...prev];
+  const handleSelectRepo = async (repo: GitHubRepo) => {
+      setCurrentRepo(repo);
+      setProjectData(null);
+      setMessages([]);
+      if (!currentUser) return;
+
+      addLog(`Carregando arquivos de ${repo.name}...`);
+      try {
+          // Carrega arquivos da raiz
+          const files = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name, '');
+          setProjectData({
+              explanation: "Carregado do GitHub",
+              commitTitle: "",
+              commitDescription: "",
+              files: files
           });
-          setCurrentProjectId(safeExisting.id);
-          setDirectoryHandle(handle);
-          setHasFilePermission(true);
-          await saveDirectoryHandleToDB(safeExisting.id, handle);
-          
-          if (currentUser) {
-              await dbService.saveProject(safeExisting);
-          }
-      } else {
-          const loaded = await readProjectFromDisk(handle);
-          const detected = detectProjectSettings(loaded.files);
-          const newId = generateUUID();
-          
-          const newP: SavedProject = {
-            id: newId,
-            name: detected.name || handle.name,
-            ownerId: currentUser?.id || 'guest',
-            ownerName: currentUser?.username || 'Convidado',
-            members: [],
-            lastModified: Date.now(),
-            settings: { ...DEFAULT_SETTINGS, name: detected.name || handle.name, ...detected },
-            messages: [{ role: 'model', text: `Projeto vinculado: **${handle.name}**.` }],
-            generatedProject: loaded.files.length > 0 ? loaded : null
-          };
-          setProjects(prev => [newP, ...prev]);
-          setCurrentProjectId(newId);
-          setDirectoryHandle(handle);
-          setHasFilePermission(true);
-          await saveDirectoryHandleToDB(newId, handle);
+          // Tenta carregar src/main/java também para ter contexto
+          try {
+              const srcFiles = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name, 'src/main/java');
+              setProjectData(prev => prev ? ({ ...prev, files: [...prev.files, ...srcFiles] }) : null);
+          } catch {}
 
-          if (currentUser) {
-              await dbService.saveProject(newP);
-              addLog("Sistema: Projeto salvo na nuvem.");
-          }
+      } catch (e) {
+          addLog("Ainda não há arquivos neste repositório ou erro ao ler.");
       }
-    } catch (e: any) { addLog(`Erro: ${e.message}`); }
   };
 
-  const handleProjectGenerated = (generated: GeneratedProject) => {
-    if (!activeProject) return;
-    let merged = [...(activeProject.generatedProject?.files || [])];
-    generated.files.forEach(f => {
-      const idx = merged.findIndex(ex => ex.path === f.path);
-      if (idx !== -1) merged[idx] = f; else merged.push(f);
-    });
-    setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, generatedProject: { ...generated, files: merged }, lastModified: Date.now() } : p));
+  // --- BUILD LOOP LOGIC ---
+  const handleCommitTriggered = () => {
+      setIsBuilding(true);
+      setLastRunId(null); // Reseta para buscar o novo
   };
 
-  const handleDeleteProject = async (id: string) => {
-    setProjects(p => p.filter(x => x.id !== id));
-    if (currentUser) {
-      await dbService.deleteProject(id);
-    }
+  useEffect(() => {
+      if (!isBuilding || !currentUser || !currentRepo) return;
+
+      const interval = setInterval(async () => {
+          try {
+              const run = await getLatestWorkflowRun(currentUser.githubToken, currentRepo.owner.login, currentRepo.name);
+              
+              if (!run) return;
+
+              // Se encontramos um run novo (ou o primeiro da sessão)
+              if (lastRunId === null || run.id !== lastRunId) {
+                  setLastRunId(run.id);
+                  addLog(`GitHub Actions: Build iniciado (Run #${run.id})`);
+              }
+
+              if (run.status === 'completed') {
+                  if (run.conclusion === 'success') {
+                      setIsBuilding(false);
+                      addLog(`✅ Build #${run.id} Sucesso!`);
+                      playSound('success');
+                      speakText("Build concluído com sucesso.");
+                  } else if (run.conclusion === 'failure') {
+                      setIsBuilding(false); // Para o polling, mas inicia a correção
+                      addLog(`❌ Build #${run.id} Falhou. Iniciando auto-correção...`);
+                      playSound('error');
+                      handleAutoFix(run.id);
+                  }
+              }
+          } catch (e) {
+              console.error("Erro no polling de build", e);
+          }
+      }, 10000); // Check a cada 10s para não estourar rate limit
+
+      return () => clearInterval(interval);
+  }, [isBuilding, currentUser, currentRepo, lastRunId]);
+
+  const handleAutoFix = async (runId: number) => {
+      if (!currentUser || !currentRepo) return;
+      
+      try {
+          addLog("Baixando logs do erro...");
+          const logs = await getWorkflowRunLogs(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, runId);
+          
+          const errorMsg: ChatMessage = {
+              role: 'user',
+              text: `O build falhou! Aqui estão os logs:\n\n${logs}\n\nCorrija o código.`,
+              id: Date.now().toString()
+          };
+          setMessages(prev => [...prev, errorMsg]);
+          
+          addLog("IA analisando erro e gerando correção...");
+          
+          // Chama IA com o contexto do projeto atual + logs
+          const fix = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
+          
+          addLog("Aplicando correção no GitHub...");
+          await commitToRepo(
+              currentUser.githubToken, 
+              currentRepo.owner.login, 
+              currentRepo.name, 
+              fix.files, 
+              fix.commitTitle || "Fix Build", 
+              fix.commitDescription || "Auto-correction based on build logs"
+          );
+          
+          const aiResponse: ChatMessage = {
+              role: 'model',
+              text: `Corrigi o erro: ${fix.explanation}. Novo build disparado.`,
+              projectData: fix,
+              id: Date.now().toString() + '_fix'
+          };
+          setMessages(prev => [...prev, aiResponse]);
+          setProjectData(fix);
+          
+          // Reinicia o loop
+          handleCommitTriggered();
+
+      } catch (e: any) {
+          addLog(`Falha na auto-correção: ${e.message}`);
+      }
   };
-
-  if (!isLoaded) return <div className="bg-[#1e1e1e] h-screen w-full flex items-center justify-center text-gray-500 font-mono">Iniciando Workspace...</div>;
-
-  if (!currentUser) {
-      return (
-          <div className="h-[100dvh] w-full bg-[#1e1e1e] flex items-center justify-center relative overflow-hidden">
-             <div className="absolute inset-0 bg-grid-animate opacity-20 pointer-events-none"></div>
-             <div className="absolute inset-0 bg-radial-gradient pointer-events-none"></div>
-             <AuthModal 
-               isOpen={true} 
-               onClose={() => {}}
-               onAuthSuccess={handleAuthSuccess}
-               canClose={false}
-             />
-          </div>
-      );
-  }
 
   return (
-    <div className="flex h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden font-sans relative">
-      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
-        {directoryHandle && !hasFilePermission && (
-             <button 
-                onClick={handleReconnectFolder}
-                className="bg-yellow-500/10 border border-yellow-500/50 hover:bg-yellow-500/20 text-yellow-200 rounded-full px-3 py-1 text-[10px] font-bold flex items-center gap-2 animate-pulse shadow-[0_0_10px_rgba(234,179,8,0.2)] transition-all cursor-pointer pointer-events-auto"
-                title="Clique para autorizar a escrita de arquivos novamente"
-             >
-                <AlertTriangle className="w-3 h-3 text-yellow-500" />
-                Reconectar Pasta
-             </button>
-        )}
+    <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden">
+      <AuthModal isOpen={isAuthOpen} onAuthSuccess={(u) => { setCurrentUser(u); setIsAuthOpen(false); }} />
 
-        {isCloudSyncing ? (
-          <div className="bg-mc-panel border border-mc-accent/30 rounded-full px-3 py-1 text-[10px] text-mc-accent flex items-center gap-2 pointer-events-none animate-pulse">
-            <Zap className="w-3 h-3 text-mc-gold" /> Salvando...
-          </div>
-        ) : isBackendConnected ? (
-          <div className="bg-mc-panel border border-mc-green/30 rounded-full px-3 py-1 text-[10px] text-mc-green flex items-center gap-2 pointer-events-none">
-            <Database className="w-3 h-3" /> Online
-          </div>
-        ) : (
-          <div className="bg-mc-panel border border-red-500/30 rounded-full px-3 py-1 text-[10px] text-red-400 flex items-center gap-2 pointer-events-none">
-            <CloudOff className="w-3 h-3" /> Modo Local
-          </div>
-        )}
-      </div>
-
-      <Sidebar 
-        isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        projects={projects} currentProjectId={currentProjectId}
-        onSelectProject={setCurrentProjectId} onCreateProject={handleOpenOrNewProject}
-        onDeleteProject={handleDeleteProject}
-        settings={activeProject?.settings || DEFAULT_SETTINGS} 
-        setSettings={newS => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
-            ...p, 
-            settings: typeof newS === 'function' ? newS(p.settings) : newS,
-            lastModified: Date.now() // Trigger imediato
-        } : p))}
-        currentUser={currentUser} onOpenLogin={() => setIsAuthModalOpen(true)} onLogout={() => setCurrentUser(null)}
-        onInviteMember={handleInvite}
-        onRemoveMember={handleRemoveMember}
-        onDeleteAccount={handleDeleteAccount}
-      />
-
-      <div className="flex-1 flex flex-col md:flex-row h-full min-w-0">
-        <div className="flex-1 md:w-[35%] h-full flex flex-col min-w-0">
-          {activeProject ? (
-            <ChatInterface 
-              key={activeProject.id} settings={activeProject.settings} messages={activeProject.messages}
-              setMessages={upd => setProjects(prev => prev.map(p => p.id === currentProjectId ? { 
-                  ...p, 
-                  messages: typeof upd === 'function' ? upd(p.messages) : upd,
-                  lastModified: Date.now() // Trigger imediato
-              } : p))}
-              currentProject={activeProject.generatedProject} 
-              fullProject={activeProject} // PASSADO PARA PERMITIR SALVAMENTO DO HISTÓRICO NO DISCO
-              onProjectGenerated={handleProjectGenerated}
-              directoryHandle={directoryHandle} onSetDirectoryHandle={setDirectoryHandle}
-              pendingMessage={pendingAiMessage} onClearPendingMessage={() => setPendingAiMessage(null)}
-              currentUser={currentUser}
-              onAiGenerationStart={() => isAiGeneratingRef.current = true}
-              onAiGenerationEnd={() => isAiGeneratingRef.current = false}
+      {currentUser && (
+        <>
+            <Sidebar 
+                isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+                settings={settings} setSettings={setSettings}
+                currentUser={currentUser} onLogout={() => { setCurrentUser(null); setIsAuthOpen(true); }}
+                repos={repos} currentRepoId={currentRepo?.id || null}
+                onSelectRepo={handleSelectRepo} onCreateRepo={handleCreateRepo}
+                onRefreshRepos={refreshRepos} isLoadingRepos={isLoadingRepos}
             />
-          ) : (
-             <div className="flex flex-col items-center justify-center h-full text-gray-500 p-8 text-center space-y-4">
-                <div className="w-20 h-20 rounded-full bg-gray-800/50 flex items-center justify-center mb-4">
-                   <TerminalSquare className="w-10 h-10 opacity-20" />
+
+            <div className="flex-1 flex flex-col md:flex-row h-full min-w-0">
+                <div className="flex-1 md:w-[35%] h-full flex flex-col min-w-0 border-r border-[#333]">
+                    <ChatInterface 
+                        settings={settings} messages={messages} setMessages={setMessages}
+                        currentRepo={currentRepo} currentProject={projectData}
+                        onProjectGenerated={setProjectData} currentUser={currentUser}
+                        isBuilding={isBuilding} onCommitTriggered={handleCommitTriggered}
+                    />
                 </div>
-                <h2 className="text-lg font-medium text-[#cccccc]">Bem-vindo ao MineGen Workspace</h2>
-                <p className="text-xs text-gray-500 max-w-xs leading-relaxed">Seus projetos são salvos automaticamente no Cache Local e Vercel Blob.</p>
-                <button onClick={handleOpenOrNewProject} className="bg-mc-accent text-white px-8 py-2.5 rounded-lg shadow-lg hover:bg-[#0062a3] text-sm font-bold transition-all">Importar / Novo Projeto</button>
-             </div>
-          )}
-        </div>
-
-        <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
-          <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
-             <CodeViewer 
-              project={activeProject?.generatedProject || null} settings={activeProject?.settings || DEFAULT_SETTINGS}
-              directoryHandle={directoryHandle} onAddToContext={setPendingAiMessage}
-            />
-          </div>
-          <Terminal logs={terminalLogs} isOpen={isTerminalOpen} onClose={() => setIsTerminalOpen(false)} onClear={() => setTerminalLogs([])} onAddLog={addLog} />
-        </div>
-      </div>
-
-      <AuthModal 
-        isOpen={isAuthModalOpen} 
-        onClose={() => setIsAuthModalOpen(false)} 
-        onAuthSuccess={handleAuthSuccess} 
-        initialUser={currentUser}
-      />
-
-      {incomingInvite && (
-         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in p-4">
-            <div className="bg-mc-panel border border-mc-accent w-full max-w-sm rounded-xl shadow-2xl overflow-hidden animate-slide-up">
-                <div className="p-6 text-center">
-                    <div className="w-12 h-12 rounded-full bg-mc-accent/20 text-mc-accent flex items-center justify-center mx-auto mb-4">
-                       <Cloud className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-lg font-bold text-white mb-2">Novo Convite</h3>
-                    <p className="text-sm text-gray-400 mb-6">
-                       <strong>{incomingInvite.senderName}</strong> convidou você para colaborar no projeto <strong className="text-white">{incomingInvite.projectName}</strong>.
-                    </p>
-                    <div className="flex gap-3">
-                       <button onClick={() => handleRespondInvite(true)} className="flex-1 bg-mc-green hover:bg-green-600 text-black font-bold py-2 rounded-lg flex items-center justify-center gap-2 transition-all">
-                          <Check className="w-4 h-4" /> Aceitar
-                       </button>
-                       <button onClick={() => handleRespondInvite(false)} className="flex-1 bg-gray-700 hover:bg-red-500/50 hover:text-red-200 text-gray-300 font-bold py-2 rounded-lg flex items-center justify-center gap-2 transition-all">
-                          <X className="w-4 h-4" /> Recusar
-                       </button>
-                    </div>
+                <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
+                    <CodeViewer 
+                        project={projectData} settings={settings} 
+                        directoryHandle={null} // Não usado mais
+                        onAddToContext={() => {}} 
+                    />
+                    <Terminal logs={terminalLogs} isOpen={true} onClose={() => {}} onClear={() => setTerminalLogs([])} onAddLog={addLog} />
                 </div>
             </div>
-         </div>
+        </>
       )}
     </div>
   );
