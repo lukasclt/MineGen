@@ -255,7 +255,7 @@ const App: React.FC = () => {
           } catch (e) {
               console.error("Erro polling build", e);
           }
-      }, 5000); // Check a cada 5s
+      }, 1000); // Check a cada 1s para detecção rápida
 
       return () => clearInterval(interval);
   }, [isBuilding, currentUser, currentRepo, lastRunId, buildTimeElapsed]);
