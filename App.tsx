@@ -94,24 +94,28 @@ const App: React.FC = () => {
       setMessages([]);
       if (!currentUser) return;
 
-      addLog(`Carregando arquivos de ${repo.name}...`);
+      addLog(`Lendo arquivos de ${repo.name} (Modo Otimizado)...`);
       try {
-          // Carrega arquivos da raiz
-          const files = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name, '');
+          // A nova função getRepoFiles agora é recursiva e baixa tudo de uma vez
+          const files = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name);
+          
           setProjectData({
               explanation: "Carregado do GitHub",
               commitTitle: "",
               commitDescription: "",
               files: files
           });
-          // Tenta carregar src/main/java também para ter contexto
-          try {
-              const srcFiles = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name, 'src/main/java');
-              setProjectData(prev => prev ? ({ ...prev, files: [...prev.files, ...srcFiles] }) : null);
-          } catch {}
+          
+          if (files.length > 0) {
+              addLog(`✅ Projeto carregado: ${files.length} arquivos.`);
+              playSound('success');
+          } else {
+              addLog("Repositório vazio ou nenhum código encontrado.");
+          }
 
-      } catch (e) {
-          addLog("Ainda não há arquivos neste repositório ou erro ao ler.");
+      } catch (e: any) {
+          addLog(`Erro ao ler repositório: ${e.message}`);
+          playSound('error');
       }
   };
 

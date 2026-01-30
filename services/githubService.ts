@@ -33,42 +33,99 @@ export const createRepository = async (token: string, name: string, description:
     return await res.json();
 };
 
-// --- FILE SYSTEM EMULATION ---
+// --- FILE SYSTEM OTIMIZADO (GIT TREE API) ---
 
-export const getRepoFiles = async (token: string, owner: string, repo: string, path: string = ''): Promise<GeneratedFile[]> => {
-    const res = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/contents/${path}`, { headers: getHeaders(token) });
-    if (!res.ok) return []; // Pode estar vazio ou path não existe
+const EXTENSIONS_TO_FETCH = new Set([
+  'java', 'xml', 'yml', 'yaml', 'json', 'gradle', 'properties', 'txt', 'md', 'gitignore', 'kts', 'cmd', 'sh'
+]);
 
-    const items = await res.json();
-    if (!Array.isArray(items)) return [];
+const IGNORED_PATHS = [
+    'target/', 'build/', '.gradle/', 'node_modules/', '.idea/', '.settings/', 'bin/', '.class'
+];
 
-    let files: GeneratedFile[] = [];
+/**
+ * Busca todos os arquivos de texto relevantes do repositório de forma recursiva e otimizada.
+ */
+export const getRepoFiles = async (token: string, owner: string, repoName: string): Promise<GeneratedFile[]> => {
+    // 1. Obter informações do repo para saber a branch padrão
+    const repoRes = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repoName}`, { headers: getHeaders(token) });
+    if (!repoRes.ok) throw new Error("Repositório não encontrado.");
+    const repoData = await repoRes.json();
+    const defaultBranch = repoData.default_branch || 'main';
 
-    for (const item of items) {
-        if (item.type === 'file') {
-            // Ignorar binários e arquivos grandes
-            if (item.name.endsWith('.jar') || item.size > 100000) continue;
-
-            const contentRes = await fetch(item.url, { headers: getHeaders(token) });
-            const contentData = await contentRes.json();
-            const content = atob(contentData.content);
-            
-            files.push({
-                path: item.path,
-                content: content,
-                language: item.name.endsWith('.java') ? 'java' : 'text'
-            });
-        } else if (item.type === 'dir' && !item.name.startsWith('.')) {
-            // Recursão simples (cuidado com limites de taxa)
-            const subFiles = await getRepoFiles(token, owner, repo, item.path);
-            files = [...files, ...subFiles];
-        }
+    // 2. Obter a árvore de arquivos completa (Tree API) recursivamente
+    // Isso evita o problema de N+1 requisições (pasta por pasta)
+    const treeRes = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repoName}/git/trees/${defaultBranch}?recursive=1`, { 
+        headers: getHeaders(token) 
+    });
+    
+    if (!treeRes.ok) {
+        if (treeRes.status === 409) return []; // Repositório vazio
+        throw new Error("Erro ao ler estrutura de arquivos.");
     }
+    
+    const treeData = await treeRes.json();
+    
+    // 3. Filtrar apenas arquivos (blobs) de texto que nos interessam
+    if (treeData.truncated) {
+        console.warn("Repositório muito grande, lista de arquivos truncada pelo GitHub.");
+    }
+
+    const relevantBlobs = treeData.tree.filter((item: any) => {
+        if (item.type !== 'blob') return false;
+        
+        // Ignora pastas inúteis
+        if (IGNORED_PATHS.some(ignore => item.path.includes(ignore))) return false;
+
+        // Verifica extensão
+        const ext = item.path.split('.').pop()?.toLowerCase();
+        return ext && EXTENSIONS_TO_FETCH.has(ext);
+    });
+
+    // 4. Download Paralelo Controlado (Batching)
+    // Navegadores limitam ~6 conexões paralelas. Fazer Promise.all em tudo causaria erro de rede ou rate limit.
+    const files: GeneratedFile[] = [];
+    const BATCH_SIZE = 6; 
+
+    for (let i = 0; i < relevantBlobs.length; i += BATCH_SIZE) {
+        const batch = relevantBlobs.slice(i, i + BATCH_SIZE);
+        
+        const batchResults = await Promise.all(batch.map(async (blob: any) => {
+            try {
+                // Fetch blob content (base64)
+                const blobRes = await fetch(blob.url, { headers: getHeaders(token) });
+                if (!blobRes.ok) return null;
+                const blobData = await blobRes.json();
+                
+                // Decode Base64 (suporta caracteres UTF-8 corretamente)
+                const content = decodeURIComponent(escape(window.atob(blobData.content)));
+                
+                let lang: any = 'text';
+                if (blob.path.endsWith('.java')) lang = 'java';
+                else if (blob.path.endsWith('.xml')) lang = 'xml';
+                else if (blob.path.endsWith('.json')) lang = 'json';
+                else if (blob.path.endsWith('.gradle') || blob.path.endsWith('.kts')) lang = 'gradle';
+                else if (blob.path.endsWith('.yml') || blob.path.endsWith('.yaml')) lang = 'yaml';
+
+                return {
+                    path: blob.path,
+                    content: content,
+                    language: lang
+                } as GeneratedFile;
+            } catch (e) {
+                console.warn(`Falha ao baixar ${blob.path}`, e);
+                return null;
+            }
+        }));
+
+        // Filtra falhas e adiciona ao array principal
+        batchResults.forEach(f => { if (f) files.push(f); });
+    }
+
     return files;
 };
 
 // --- COMMIT COMPLEXO (GIT TREE API) ---
-// Isso evita múltiplos commits "spam" e permite commitar vários arquivos de uma vez
 
 export const commitToRepo = async (
     token: string, 
@@ -78,11 +135,14 @@ export const commitToRepo = async (
     message: string,
     description: string = ""
 ) => {
-    const branch = 'main';
+    // Busca a branch padrão dinamicamente para evitar erro se for 'master' em vez de 'main'
+    const repoInfoRes = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}`, { headers: getHeaders(token) });
+    const repoInfo = await repoInfoRes.json();
+    const branch = repoInfo.default_branch || 'main';
 
-    // 1. Pegar referência do último commit da branch main
+    // 1. Pegar referência do último commit
     const refRes = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/git/ref/heads/${branch}`, { headers: getHeaders(token) });
-    if (!refRes.ok) throw new Error("Não foi possível encontrar a branch main. Inicialize o repo.");
+    if (!refRes.ok) throw new Error(`Não foi possível encontrar a branch ${branch}.`);
     const refData = await refRes.json();
     const latestCommitSha = refData.object.sha;
 
@@ -92,14 +152,18 @@ export const commitToRepo = async (
     const baseTreeSha = commitData.tree.sha;
 
     // 3. Criar Blobs para cada arquivo modificado
+    // Nota: Para repositórios grandes, isso deve ser feito em batch também, mas para commits pontuais da IA é ok.
     const treeItems = [];
     for (const file of files) {
+        // Encode UTF-8 to Base64 safe string
+        const base64Content = btoa(unescape(encodeURIComponent(file.content)));
+
         const blobRes = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/git/blobs`, {
             method: 'POST',
             headers: getHeaders(token),
             body: JSON.stringify({
-                content: file.content,
-                encoding: 'utf-8'
+                content: base64Content,
+                encoding: 'base64' // Usar base64 é mais seguro para caracteres especiais
             })
         });
         const blobData = await blobRes.json();
@@ -121,6 +185,8 @@ export const commitToRepo = async (
             tree: treeItems
         })
     });
+    
+    if (!newTreeRes.ok) throw new Error("Erro ao criar Git Tree");
     const newTreeData = await newTreeRes.json();
     const newTreeSha = newTreeData.sha;
 
@@ -135,6 +201,8 @@ export const commitToRepo = async (
             parents: [latestCommitSha]
         })
     });
+    
+    if (!newCommitRes.ok) throw new Error("Erro ao criar Git Commit");
     const newCommitData = await newCommitRes.json();
     const newCommitSha = newCommitData.sha;
 
