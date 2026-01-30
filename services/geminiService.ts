@@ -2,111 +2,88 @@
 import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User, AIProvider, GeneratedFile } from "../types";
 import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
-/**
- * Função auxiliar para extrair JSON de respostas "sujas" (com texto antes/depois ou markdown)
- */
 function extractJson(text: string): any {
   try {
-    // 1. Tenta parse direto
     return JSON.parse(text);
   } catch (e) {
-    // 2. Tenta extrair de blocos de código markdown ```json ... ```
     const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (codeBlockMatch) {
       try {
         return JSON.parse(codeBlockMatch[1]);
-      } catch (e2) {
-        // Continua tentando...
-      }
+      } catch (e2) {}
     }
-
-    // 3. Tenta encontrar o primeiro '{' e o último '}'
     const firstBrace = text.indexOf('{');
     const lastBrace = text.lastIndexOf('}');
-
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       const potentialJson = text.substring(firstBrace, lastBrace + 1);
       try {
         return JSON.parse(potentialJson);
       } catch (e3) {
-        console.error("Falha ao parsear JSON extraído:", potentialJson);
-        throw new Error("A IA retornou um formato inválido. Tente outro modelo.");
+        throw new Error("Formato JSON inválido retornado pela IA.");
       }
     }
-
-    throw new Error("Nenhum JSON válido encontrado na resposta da IA.");
+    throw new Error("Nenhum JSON encontrado na resposta.");
   }
 }
 
-/**
- * Serviço de integração com OpenRouter (API Unificada) ou GitHub Models
- */
 export const generatePluginCode = async (
   prompt: string, 
   settings: PluginSettings,
   previousProject?: GeneratedProject | null,
   attachments: Attachment[] = [],
   currentUser?: User | null,
-  signal?: AbortSignal // Adicionado suporte a sinal de cancelamento
+  signal?: AbortSignal
 ): Promise<GeneratedProject> => {
   
-  // CONFIGURAÇÃO DO PROVIDER
   let baseUrl = 'https://openrouter.ai/api/v1';
   let apiKey = '';
   let providerHeader = {};
 
   if (settings.aiProvider === AIProvider.GITHUB_COPILOT) {
-      // Endpoint padrão para GitHub Models (via Azure AI Inference ou GitHub Gateway)
       baseUrl = 'https://models.inference.ai.azure.com';
       apiKey = currentUser?.githubToken || '';
-      if (!apiKey) throw new Error("Token do GitHub não encontrado. Faça login novamente.");
+      if (!apiKey) throw new Error("Token do GitHub não encontrado.");
   } else {
-      // OpenRouter Padrão
       baseUrl = 'https://openrouter.ai/api/v1';
       apiKey = currentUser?.savedApiKey || process.env.API_KEY || '';
-      if (!apiKey) throw new Error("API Key do OpenRouter não encontrada. Configure-a no seu Perfil.");
+      if (!apiKey) throw new Error("API Key do OpenRouter não encontrada.");
       providerHeader = {
           'HTTP-Referer': window.location.origin,
           'X-Title': 'MineGen AI Cloud',
       };
   }
 
-  let userPromptContext = "";
-
-  // CONSTRUÇÃO DO PROMPT TIPO C (Context Injection)
+  // --- CONTEXTO TRADUZIDO PARA PT-BR ---
   const projectContext = `
-# PROJECT CONTEXT
-- **Project Name**: ${settings.name}
-- **Target Platform**: ${settings.platform}
-- **Minecraft Version**: ${settings.mcVersion}
-- **Java Version**: ${settings.javaVersion} (STRICT REQUIREMENT for Gradle)
-- **Build System**: ${settings.buildSystem}
+# CONTEXTO DO PROJETO
+- **Nome**: ${settings.name}
+- **Plataforma**: ${settings.platform}
+- **Versão MC**: ${settings.mcVersion}
+- **Java**: ${settings.javaVersion} (Requisito ESTRITO para Gradle)
+- **Sistema de Build**: ${settings.buildSystem}
 - **Group ID**: ${settings.groupId}
 - **Artifact ID**: ${settings.artifactId}
 
-# GRADLE CONFIGURATION RULE
-You MUST configure the 'build.gradle' file to explicitly use **Java ${settings.javaVersion}**.
-Example for Java 17:
+# REGRA DE CONFIGURAÇÃO GRADLE
+Você DEVE configurar o 'build.gradle' para usar explicitamente **Java ${settings.javaVersion}**.
+Exemplo para Java 17:
 \`\`\`groovy
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(17))
 }
 \`\`\`
-Or strict sourceCompatibility = '17' if toolchains are not used. 
-Ensure the build task is compatible with the GitHub Actions runner using Java ${settings.javaVersion}.
+Certifique-se que a task de build seja compatível com o GitHub Actions rodando Java ${settings.javaVersion}.
   `;
 
+  let userPromptContext = "";
+
   if (previousProject && previousProject.files.length > 0) {
-    // --- CONTEXT PRUNING (Limitação de Contexto) ---
-    // GitHub Models Free Tier tem limites de ~8k tokens totais (prompt + resposta).
-    // Limitamos o contexto de entrada a ~20.000 caracteres (aprox 5k tokens) para deixar espaço.
-    
+    // Context Pruning (~20k chars)
     const MAX_CONTEXT_CHARS = 20000;
     let currentChars = 0;
     let fileContext = "";
     let skippedCount = 0;
 
-    // Prioriza arquivos importantes: Build files > Java Source > Configs > Others
     const sortedFiles = [...previousProject.files].sort((a, b) => {
         const getScore = (f: GeneratedFile) => {
             if (f.path.endsWith('build.gradle') || f.path.endsWith('pom.xml')) return 100;
@@ -119,10 +96,9 @@ Ensure the build task is compatible with the GitHub Actions runner using Java ${
     });
 
     for (const f of sortedFiles) {
-        // Ignora arquivos irrelevantes para a IA
         if (f.path.includes('.minegen') || f.path.includes('gradlew') || f.path.endsWith('.lock')) continue;
         
-        const fileEntry = `FILE: ${f.path}\n\`\`\`${f.language}\n${f.content}\n\`\`\`\n\n`;
+        const fileEntry = `ARQUIVO: ${f.path}\n\`\`\`${f.language}\n${f.content}\n\`\`\`\n\n`;
         
         if (currentChars + fileEntry.length < MAX_CONTEXT_CHARS) {
             fileContext += fileEntry;
@@ -133,39 +109,40 @@ Ensure the build task is compatible with the GitHub Actions runner using Java ${
     }
 
     if (skippedCount > 0) {
-        fileContext += `\n[NOTE: ${skippedCount} less critical files were omitted to fit context limits. Focus on provided files.]\n`;
+        fileContext += `\n[NOTA: ${skippedCount} arquivos menos críticos foram omitidos para caber no limite.]\n`;
     }
 
     userPromptContext = `
 ${projectContext}
 
-# EXISTING CODEBASE (Partially Loaded)
-The user is requesting changes to an existing project. Analyze the files below:
+# CÓDIGO EXISTENTE (Parcialmente Carregado)
+O usuário quer alterar um projeto existente. Analise os arquivos abaixo:
 ${fileContext}
 
-# USER REQUEST
+# PEDIDO DO USUÁRIO
 ${prompt}
 
-# INSTRUCTIONS
-- Modify the existing files or create new ones to satisfy the request.
-- Return the FULL content of any modified file.
-- Do not remove existing functionality unless asked.
+# INSTRUÇÕES
+- Modifique os arquivos ou crie novos.
+- Responda em Português.
+- Mantenha funcionalidades existentes a menos que pedido o contrário.
     `;
   } else {
     userPromptContext = `
 ${projectContext}
 
-# NEW PROJECT REQUEST
-The user wants to create a brand new plugin from scratch.
+# NOVO PROJETO
+O usuário quer criar um plugin do zero.
 
-# USER REQUIREMENTS
+# REQUISITOS DO USUÁRIO
 ${prompt}
 
-# INSTRUCTIONS
-- Scaffold a complete project structure.
-- Include 'plugin.yml' (or 'paper-plugin.yml'/'bungee.yml'/'velocity-plugin.json' based on platform).
-- Include the build file (${settings.buildSystem === BuildSystem.MAVEN ? 'pom.xml' : 'build.gradle'}).
-- Create the Main class and any necessary packages.
+# INSTRUÇÕES
+- Crie a estrutura completa do projeto.
+- Inclua 'plugin.yml' (ou equivalente).
+- Inclua 'build.gradle' configurado.
+- Crie a classe Main e pacotes necessários.
+- Responda em Português.
     `;
   }
 
@@ -182,13 +159,13 @@ ${prompt}
     } else {
       contentArray.push({
         type: "text",
-        text: `\n--- ATTACHMENT: ${att.name} ---\n${att.content}\n`
+        text: `\n--- ANEXO: ${att.name} ---\n${att.content}\n`
       });
     }
   });
 
   try {
-    console.log(`[AI] Enviando requisição para provider: ${settings.aiProvider}, modelo: ${settings.aiModel}`);
+    console.log(`[AI] Req: ${settings.aiProvider} / ${settings.aiModel}`);
     
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -203,12 +180,11 @@ ${prompt}
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: contentArray }
         ],
-        // GitHub Models não suporta response_format json_object em todos os modelos, então enviamos apenas se for GPT/Gemini
         response_format: (settings.aiModel?.includes('gpt') || settings.aiModel?.includes('gemini')) ? { type: "json_object" } : undefined,
-        temperature: 0.2, // Baixa temperatura para código preciso
-        max_tokens: 4096, // Ajustado para garantir que não estoure o limite total
+        temperature: 0.2,
+        max_tokens: 4096,
       }),
-      signal: signal // Passa o sinal para o fetch
+      signal: signal
     });
 
     if (!response.ok) {
@@ -217,32 +193,20 @@ ${prompt}
       try {
         const errJson = JSON.parse(errorText);
         errorMsg = errJson.error?.message || errorMsg;
-      } catch {
-        errorMsg = errorText || errorMsg;
-      }
+      } catch {}
       throw new Error(`AI Provider Error: ${errorMsg}`);
     }
 
     const data = await response.json();
-    
-    if (!data.choices || data.choices.length === 0) {
-      throw new Error("A IA não retornou nenhuma resposta (choices vazio).");
-    }
-
+    if (!data.choices || data.choices.length === 0) throw new Error("Resposta vazia da IA.");
     const rawContent = data.choices[0].message.content;
-    
-    // Usa o parser robusto
     const project = extractJson(rawContent) as GeneratedProject;
 
-    // Validação básica
-    if (!project.files || !Array.isArray(project.files)) {
-      throw new Error("O JSON retornado não contém uma lista de arquivos válida.");
-    }
+    if (!project.files) throw new Error("JSON inválido: sem arquivos.");
 
-    // Injetar wrappers se necessário (apenas para Gradle)
+    // Wrapper injection
     if (settings.buildSystem === BuildSystem.GRADLE) {
         const hasWrapper = project.files.some(f => f.path.includes('gradlew'));
-        
         if (!hasWrapper) {
             project.files.push(
                 { path: 'gradlew', content: GRADLEW_UNIX, language: 'text' },
@@ -254,10 +218,8 @@ ${prompt}
 
     return project;
   } catch (e: any) {
-    if (e.name === 'AbortError') {
-        throw new Error("TIMEOUT");
-    }
-    console.error("AI Generation Error Completo:", e);
-    throw new Error(e.message || "Falha na comunicação com o Provider de IA.");
+    if (e.name === 'AbortError') throw new Error("Tempo limite excedido.");
+    console.error("AI Error:", e);
+    throw new Error(e.message || "Falha na IA.");
   }
 };

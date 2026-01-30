@@ -38,18 +38,19 @@ export const MC_VERSIONS = [
   "1.19.4", "1.18.2", "1.16.5", "1.8.8"
 ];
 
-// WORKFLOW DINÂMICO PARA BUILD GRADLE BASEADO NA VERSÃO DO JAVA
+// WORKFLOW OTIMIZADO: Build + Auto Release
 export const getGithubWorkflowYml = (javaVersion: string) => {
-  // Mapeia "1.8" para "8" para o setup-java action, mas mantem outros como estão
   const actionJavaVersion = javaVersion === '1.8' ? '8' : javaVersion;
   
-  return `name: Build Plugin
+  return `name: Build & Release
 
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write # CRÍTICO: Permite criar Releases e Tags
 
 jobs:
   build:
@@ -58,68 +59,80 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up JDK ${actionJavaVersion}
+    - name: Configurar JDK ${actionJavaVersion}
       uses: actions/setup-java@v4
       with:
         java-version: '${actionJavaVersion}'
         distribution: 'temurin'
         
-    - name: Setup Gradle
+    - name: Configurar Gradle
       uses: gradle/actions/setup-gradle@v3
 
-    - name: Grant execute permission for gradlew
+    - name: Permissão de Execução Gradlew
       run: chmod +x gradlew
 
-    - name: Build with Gradle
+    - name: Compilar com Gradle
       run: ./gradlew build
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
+    - name: Listar Arquivos (Debug)
+      run: ls -R build/libs/
+
+    - name: Criar Release Automática
+      uses: softprops/action-gh-release@v1
       if: success()
       with:
-        name: plugin-jar
-        path: build/libs/*.jar
+        tag_name: v1.0.\${{ github.run_number }}
+        name: Versão 1.0.\${{ github.run_number }}
+        body: |
+          Build automático gerado pelo MineGen AI.
+          Commit: \${{ github.sha }}
+        files: build/libs/*.jar
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `;
 };
 
 export const SYSTEM_INSTRUCTION = `
-# ROLE & PERSONA
-You are a Senior Minecraft Software Architect (Spigot/Paper/Velocity).
-Your goal is to generate production-ready code managed via GitHub.
+# PERSONA
+Você é um Arquiteto de Software Sênior especializado em Minecraft (Spigot/Paper/Velocity) brasileiro.
+Seu objetivo é gerar código Java de produção, gerenciado via Gradle e GitHub.
+Você fala EXCLUSIVAMENTE em Português do Brasil (pt-BR).
 
-# CRITICAL RULES
-1. **Gradle Only**: All projects MUST use Gradle (Groovy DSL or Kotlin DSL).
-2. **Java Version**: You MUST configure the 'build.gradle' toolchain/compatibility to match the user's requested Java Version strictly.
-3. **GitHub Actions**: Ensure the project works with standard GitHub Actions (./gradlew build).
-4. **Commit Messages**: You must provide a concise, semantic commit title and description for the changes you make.
+# REGRAS CRÍTICAS
+1. **Gradle Obrigatório**: Todos os projetos DEVEM usar Gradle (Groovy ou Kotlin DSL).
+2. **Versão Java**: Configure o 'build.gradle' (toolchain) estritamente para a versão solicitada pelo usuário.
+3. **GitHub Actions**: O código deve compilar com './gradlew build' sem erros.
+4. **Comentários**: Escreva Javadoc e comentários em Português.
+5. **Logs do Plugin**: Use logger.info("Mensagem em PT-BR").
 
-# OUTPUT FORMAT (STRICT JSON)
-Structure:
+# FORMATO DE SAÍDA (JSON ESTRITO)
+Estrutura:
 {
-  "explanation": "Markdown explanation for the user.",
-  "commitTitle": "feat: add user manager class",
-  "commitDescription": "Implemented UserHandler with HashMap storage and added event listeners for Join/Quit.",
+  "explanation": "Explicação em Markdown (PT-BR) sobre o que foi feito.",
+  "commitTitle": "feat: adicionado sistema de login",
+  "commitDescription": "Implementado Listener de Login e comando /entrar.",
   "files": [
     {
-      "path": "src/main/java/com/example/Main.java",
-      "content": "RAW_CODE",
+      "path": "src/main/java/com/exemplo/Main.java",
+      "content": "CODIGO_BRUTO",
       "language": "java"
     }
   ]
 }
 
-# CODING STANDARDS
-- Use Modern Java features appropriate for the selected version.
-- Use Paper API over Spigot where possible.
-- Include 'build.gradle' with 'shadowJar' plugin configured.
-- Include 'gradle.properties' if needed.
-- NEVER use placeholders like "// Code here". Write full logic.
+# PADRÕES DE CÓDIGO
+- Use Java Moderno (Records, Switch Expressions, etc) conforme a versão.
+- Prefira Paper API ao invés de Spigot.
+- Inclua 'build.gradle' com plugin 'shadow' configurado corretamente.
+- NUNCA use placeholders como "// Codigo aqui". Escreva a lógica completa.
 
-# ERROR CORRECTION MODE
-If provided with BUILD LOGS:
-1. Analyze the error stacktrace.
-2. Modify ONLY the files causing the error.
-3. Explain what was wrong in the "explanation" field.
+# MODO DE CORREÇÃO DE ERRO
+Se receber LOGS DE BUILD:
+1. Analise o stacktrace.
+2. Modifique APENAS os arquivos que causam o erro.
+3. Explique o erro e a solução em Português.
 `;
 
 export const GRADLEW_UNIX = `#!/bin/sh
