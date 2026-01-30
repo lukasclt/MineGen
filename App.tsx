@@ -10,7 +10,10 @@ import { DEFAULT_SETTINGS, getGithubWorkflowYml } from './constants';
 import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo } from './services/githubService';
 import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
-import { Loader2, Hammer, BrainCircuit } from 'lucide-react';
+import { Loader2, Hammer, BrainCircuit, Clock } from 'lucide-react';
+
+// Tempo estimado de build: 1 minuto e 30 segundos
+const ESTIMATED_BUILD_TIME = 90;
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -30,7 +33,7 @@ const App: React.FC = () => {
   // Build & Release State
   const [isBuilding, setIsBuilding] = useState(false);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
-  const [buildProgress, setBuildProgress] = useState(0); // 0-100%
+  // buildProgress agora será derivado do tempo, não simulado aleatoriamente
   const [buildTimeElapsed, setBuildTimeElapsed] = useState(0);
 
   // IA Generation State (Lifting State Up)
@@ -180,37 +183,28 @@ const App: React.FC = () => {
   const handleCommitTriggered = () => {
       setIsBuilding(true);
       setLastRunId(null);
-      setBuildProgress(0);
       setBuildTimeElapsed(0);
       addLog("------------------------------------------------");
-      addLog("🚀 Commit realizado! Aguardando início do Build...");
+      addLog(`🚀 Commit realizado! Iniciando espera de ${ESTIMATED_BUILD_TIME}s para o build...`);
   };
 
-  // Simulador de Progresso Visual
+  // Timer: Conta o tempo real em segundos
   useEffect(() => {
       let interval: any;
       if (isBuilding) {
           interval = setInterval(() => {
               setBuildTimeElapsed(prev => prev + 1);
-              setBuildProgress(prev => {
-                  // Simula progresso logarítmico até 95%
-                  if (prev < 95) return prev + (Math.random() * 1.5); 
-                  return prev;
-              });
           }, 1000);
-      } else {
-          if (!isBuilding && buildProgress > 0 && buildProgress < 100) {
-              setBuildProgress(100);
-          }
       }
       return () => clearInterval(interval);
   }, [isBuilding]);
 
   // Monitoramento do GitHub Actions
+  // Lógica: Espera 1m 30s (90s) e depois checa a cada 1 segundo.
   useEffect(() => {
       if (!isBuilding || !currentUser || !currentRepo) return;
 
-      const interval = setInterval(async () => {
+      const checkBuildStatus = async () => {
           try {
               const run = await getLatestWorkflowRun(currentUser.githubToken, currentRepo.owner.login, currentRepo.name);
               
@@ -221,24 +215,13 @@ const App: React.FC = () => {
                   addLog(`🔨 GitHub Actions: Build #${run.id} detectado.`);
               }
 
-              if (run.status === 'in_progress') {
-                  const estimatedTotal = 90; // média de 90s para build Gradle
-                  const remaining = Math.max(0, estimatedTotal - buildTimeElapsed);
-                  const progress = Math.min(99, Math.floor(buildProgress));
-                  
-                  // Loga sempre que a verificação acontece (a cada 10s)
-                  addLog(`⏳ Compilando... ${progress}% (Decorridos: ${buildTimeElapsed}s | Restante est.: ${remaining}s)`);
-              }
-
               if (run.status === 'completed') {
                   if (run.conclusion === 'success') {
                       setIsBuilding(false);
-                      setBuildProgress(100);
                       const tagVersion = `v1.0.${run.run_number}`;
                       
-                      addLog(`✅ Build #${run.id} Sucesso! (100% - Tempo total: ${buildTimeElapsed}s)`);
+                      addLog(`✅ Build #${run.id} Sucesso! (Tempo total: ${buildTimeElapsed}s)`);
                       addLog(`📦 Release ${tagVersion} publicada!`);
-                      addLog(`⬇️ Download disponível na aba 'Releases' do GitHub.`);
                       
                       playSound('success');
                       speakText("Build e Release concluídos com sucesso.");
@@ -249,13 +232,34 @@ const App: React.FC = () => {
                       speakText("O build falhou.");
                       handleAutoFix(run.id);
                   }
+              } else if (run.status === 'in_progress' && buildTimeElapsed >= ESTIMATED_BUILD_TIME) {
+                   // Apenas loga progresso se já passamos do tempo e estamos checando agressivamente
+                   addLog(`🔍 Verificando conclusão... (Tempo: ${buildTimeElapsed}s)`);
               }
           } catch (e) {
               console.error("Erro polling build", e);
           }
-      }, 10000); // Check a cada 10s para evitar spam e facilitar leitura
+      };
 
-      return () => clearInterval(interval);
+      let intervalId: any;
+
+      if (buildTimeElapsed >= ESTIMATED_BUILD_TIME) {
+          // PASSOU DE 1m 30s: Checa agressivamente (1s/loop)
+          checkBuildStatus(); // Checa imediatamente ao entrar neste estado
+          intervalId = setInterval(checkBuildStatus, 1000);
+      } else {
+          // MENOS DE 1m 30s:
+          // Se ainda não temos o ID do Run, checamos ocasionalmente (a cada 3s) para confirmar que começou.
+          // Se já temos o ID, ficamos em silêncio esperando o tempo passar para não gastar API quota.
+          if (lastRunId === null) {
+              intervalId = setInterval(checkBuildStatus, 3000);
+          }
+      }
+
+      return () => {
+          if (intervalId) clearInterval(intervalId);
+      };
+
   }, [isBuilding, currentUser, currentRepo, lastRunId, buildTimeElapsed]);
 
   const handleAutoFix = async (runId: number) => {
@@ -274,8 +278,6 @@ const App: React.FC = () => {
           
           addLog("🤖 IA analisando erro e gerando correção...");
           
-          // Nota: Auto-fix usa o serviço, mas não bloqueia a UI da mesma forma que o chat manual, 
-          // ou podemos querer bloquear também. Por enquanto deixamos assíncrono.
           const fix = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
           
           addLog("🛠️ Aplicando correção no GitHub...");
@@ -305,6 +307,10 @@ const App: React.FC = () => {
   };
 
   const showOverlay = isGenerating || isBuilding;
+  
+  // Cálculo visual do progresso baseado no tempo (capped em 100%)
+  const visualProgress = Math.min(100, (buildTimeElapsed / ESTIMATED_BUILD_TIME) * 100);
+  const remainingSeconds = Math.max(0, ESTIMATED_BUILD_TIME - buildTimeElapsed);
 
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden relative">
@@ -323,7 +329,7 @@ const App: React.FC = () => {
                    </div>
                ) : (
                    <div className="relative">
-                       <Hammer className="w-16 h-16 text-mc-gold animate-bounce" />
+                       <Clock className="w-16 h-16 text-mc-gold animate-bounce" />
                        <div className="absolute -bottom-1 -right-1">
                             <Loader2 className="w-6 h-6 text-white animate-spin" />
                        </div>
@@ -337,13 +343,15 @@ const App: React.FC = () => {
                    <p className="text-sm text-gray-400">
                        {isGenerating 
                          ? "A IA está analisando sua solicitação e escrevendo os arquivos." 
-                         : `O GitHub Actions está construindo seu JAR. (${Math.floor(buildProgress)}%)`}
+                         : buildTimeElapsed < ESTIMATED_BUILD_TIME 
+                             ? `Aguardando GitHub Actions... (${remainingSeconds}s restantes)`
+                             : "Finalizando verificação..."}
                    </p>
                </div>
 
                {isBuilding && (
                    <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden mt-2">
-                       <div className="h-full bg-mc-green transition-all duration-300" style={{width: `${buildProgress}%`}}></div>
+                       <div className="h-full bg-mc-green transition-all duration-1000 linear" style={{width: `${visualProgress}%`}}></div>
                    </div>
                )}
            </div>
@@ -382,13 +390,19 @@ const App: React.FC = () => {
                     {isBuilding && !showOverlay && (
                         <div className="bg-[#252526] border-t border-[#333] px-4 py-2">
                             <div className="flex justify-between text-xs text-white mb-1 font-mono">
-                                <span>BUILD EM ANDAMENTO (Run #{lastRunId || '...'})</span>
-                                <span>{Math.min(100, Math.floor(buildProgress))}% (Est: {90 - buildTimeElapsed}s)</span>
+                                <span>
+                                    BUILD EM ANDAMENTO (Run #{lastRunId || '...'})
+                                </span>
+                                <span>
+                                    {buildTimeElapsed < ESTIMATED_BUILD_TIME 
+                                        ? `Aguardando: ${remainingSeconds}s` 
+                                        : "Verificando..."}
+                                </span>
                             </div>
                             <div className="w-full bg-[#333] h-2 rounded-full overflow-hidden">
                                 <div 
-                                    className="bg-mc-green h-full transition-all duration-300 ease-out"
-                                    style={{ width: `${buildProgress}%` }}
+                                    className="bg-mc-green h-full transition-all duration-1000 linear"
+                                    style={{ width: `${visualProgress}%` }}
                                 ></div>
                             </div>
                         </div>
