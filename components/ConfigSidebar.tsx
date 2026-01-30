@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, GitHubRepo, BuildSystem, User, AIProvider } from '../types';
 import { MC_VERSIONS, GITHUB_COPILOT_MODELS } from '../constants';
-import { GitBranch, Plus, Trash2, Sliders, Box, LogOut, Settings2, FolderGit2, Loader2, RefreshCw, Cpu, Github, Globe } from 'lucide-react';
+import { GitBranch, Plus, Sliders, LogOut, FolderGit2, RefreshCw, Github } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -34,7 +34,7 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
 
   const isConfigDisabled = !currentRepoId;
 
-  // Lista de Modelos sempre do GitHub Copilot
+  // Lista fixa do GitHub Copilot (Agora contém apenas GPT-4o)
   const currentModelList = GITHUB_COPILOT_MODELS;
 
   return (
@@ -100,19 +100,35 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
         {activeTab === 'config' && (
            <div className="p-4 space-y-6">
                 
+                {/* AI Provider Info (Static) */}
+                <div className="space-y-2 bg-[#252526] p-3 rounded-md border border-[#333]">
+                    <div className="flex items-center gap-2 mb-2">
+                        <Github className="w-4 h-4 text-white" />
+                        <span className="text-xs font-bold text-gray-400 uppercase">Provider</span>
+                    </div>
+                    <div className="w-full bg-[#238636] text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-1">
+                         GitHub Copilot
+                    </div>
+                </div>
+
                 <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
-                   <label className="text-xs font-bold text-gray-400 uppercase">Modelo de IA (GitHub Models)</label>
+                   <label className="text-xs font-bold text-gray-400 uppercase">
+                       Modelo de IA
+                   </label>
+                   
                    <select 
                      value={settings.aiModel} 
                      onChange={(e) => handleChange('aiModel', e.target.value)} 
                      className="w-full bg-[#1e1e1e] border border-[#333] rounded p-2 text-xs text-white outline-none"
+                     disabled={true} // Apenas GPT-4o disponível
                    >
                      {currentModelList.map(model => (
                        <option key={model.id} value={model.id}>{model.name}</option>
                      ))}
                    </select>
+
                    <p className="text-[10px] text-green-400 mt-1">
-                       Usando sua conta GitHub conectada (GitHub Models).
+                       Modelo exclusivo de alta capacidade.
                    </p>
                 </div>
 

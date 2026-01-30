@@ -17,25 +17,34 @@ interface ChatInterfaceProps {
   // Controle de Build
   isBuilding: boolean;
   onCommitTriggered: () => void;
+  // Estado de Geração da IA (Lifting State Up)
+  isGenerating: boolean;
+  setIsGenerating: (generating: boolean) => void;
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   settings, messages, setMessages, currentRepo, currentProject, onProjectGenerated,
-  currentUser, isBuilding, onCommitTriggered
+  currentUser, isBuilding, onCommitTriggered,
+  isGenerating, setIsGenerating
 }) => {
   const [input, setInput] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const [statusText, setStatusText] = useState('');
   
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Estado unificado de "Ocupado"
+  const isBusy = isGenerating || isBuilding;
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, statusText]);
 
   const handleSend = async () => {
+     // Bloqueio de segurança
+     if (isBusy) return;
+
      if (!input.trim() && attachments.length === 0) return;
      if (!currentRepo || !currentUser) {
          alert("Selecione um repositório primeiro.");
@@ -53,8 +62,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
      setInput('');
      setAttachments([]);
      
-     setIsProcessing(true);
-     setStatusText("Gerando código com IA...");
+     setIsGenerating(true);
+     setStatusText("Gerando código com IA (Isso pode levar um minuto)...");
 
      try {
          // 1. Gera código (JSON)
@@ -94,9 +103,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
          }]);
          playSound('error');
      } finally {
-         setIsProcessing(false);
+         setIsGenerating(false);
          setStatusText("");
      }
+  };
+
+  // Helper para placeholder dinâmico
+  const getPlaceholder = () => {
+      if (!currentRepo) return "Selecione um repositório...";
+      if (isBuilding) return "Aguarde o build finalizar...";
+      if (isGenerating) return "A IA está gerando código...";
+      return "Descreva as alterações...";
   };
 
   return (
@@ -145,7 +162,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
              </div>
          ))}
          
-         {isProcessing && (
+         {isGenerating && (
              <div className="flex items-center gap-3 p-4 bg-[#252526] rounded-lg border border-[#333] w-fit">
                  <Loader2 className="w-4 h-4 text-mc-accent animate-spin" />
                  <span className="text-xs text-gray-300">{statusText}</span>
@@ -167,8 +184,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             </div>
         )}
         <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2">
-           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white">
-               <Paperclip className="w-5 h-5" />
+           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white" disabled={isBusy}>
+               <Paperclip className={`w-5 h-5 ${isBusy ? 'opacity-50' : ''}`} />
            </button>
            <input type="file" multiple className="hidden" ref={fileInputRef} onChange={e => {
                if (e.target.files) {
@@ -183,12 +200,16 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
            <input 
              value={input} 
              onChange={e => setInput(e.target.value)} 
-             className="flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent"
-             placeholder={currentRepo ? "Descreva as alterações..." : "Selecione um repositório..."}
-             disabled={!currentRepo || isProcessing}
+             className={`flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent ${isBusy ? 'opacity-50 cursor-not-allowed' : ''}`}
+             placeholder={getPlaceholder()}
+             disabled={!currentRepo || isBusy}
            />
-           <button type="submit" disabled={!input.trim() || isProcessing} className="bg-mc-accent p-2 rounded-lg text-white disabled:opacity-50">
-               <Send className="w-5 h-5" />
+           <button 
+             type="submit" 
+             disabled={(!input.trim() && attachments.length === 0) || isBusy} 
+             className="bg-mc-accent p-2 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+           >
+               {isBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
            </button>
         </form>
       </div>

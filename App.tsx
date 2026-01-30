@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS, getGithubWorkflowYml } from './constants';
 import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo } from './services/githubService';
 import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
+import { Loader2, Hammer, BrainCircuit } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -31,6 +32,9 @@ const App: React.FC = () => {
   const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [buildProgress, setBuildProgress] = useState(0); // 0-100%
   const [buildTimeElapsed, setBuildTimeElapsed] = useState(0);
+
+  // IA Generation State (Lifting State Up)
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const addLog = (msg: string) => setTerminalLogs(prev => [...prev, msg]);
 
@@ -134,11 +138,9 @@ const App: React.FC = () => {
       const savedSettings = localStorage.getItem(`minegen_settings_${repo.id}`);
       if (savedSettings) {
           const parsed = JSON.parse(savedSettings);
-          // MIGRATION: Se estiver usando OpenRouter (removido), migra para Copilot
-          if (parsed.aiProvider === AIProvider.OPENROUTER || parsed.aiProvider === 'OpenRouter') {
-              parsed.aiProvider = AIProvider.GITHUB_COPILOT;
-              parsed.aiModel = 'gpt-4o';
-          }
+          // GARANTIR QUE SEMPRE USA GITHUB COPILOT
+          parsed.aiProvider = AIProvider.GITHUB_COPILOT;
+          parsed.aiModel = 'gpt-4o';
           setSettings(prev => ({...prev, ...parsed}));
       } else {
           // Se não tiver settings salvas, tenta inferir pelo nome ou usa padrão
@@ -274,6 +276,8 @@ const App: React.FC = () => {
           
           addLog("🤖 IA analisando erro e gerando correção...");
           
+          // Nota: Auto-fix usa o serviço, mas não bloqueia a UI da mesma forma que o chat manual, 
+          // ou podemos querer bloquear também. Por enquanto deixamos assíncrono.
           const fix = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
           
           addLog("🛠️ Aplicando correção no GitHub...");
@@ -302,9 +306,51 @@ const App: React.FC = () => {
       }
   };
 
+  const showOverlay = isGenerating || isBuilding;
+
   return (
-    <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden">
+    <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden relative">
       <AuthModal isOpen={isAuthOpen} onAuthSuccess={(u) => { setCurrentUser(u); setIsAuthOpen(false); }} />
+
+      {/* OVERLAY DE BLOQUEIO / LOADING */}
+      {showOverlay && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center flex-col animate-fade-in">
+           <div className="bg-[#252526] p-8 rounded-xl border border-[#444] shadow-2xl flex flex-col items-center gap-4 max-w-sm w-full text-center">
+               {isGenerating ? (
+                   <div className="relative">
+                       <BrainCircuit className="w-16 h-16 text-mc-accent animate-pulse" />
+                       <div className="absolute -bottom-1 -right-1">
+                            <Loader2 className="w-6 h-6 text-white animate-spin" />
+                       </div>
+                   </div>
+               ) : (
+                   <div className="relative">
+                       <Hammer className="w-16 h-16 text-mc-gold animate-bounce" />
+                       <div className="absolute -bottom-1 -right-1">
+                            <Loader2 className="w-6 h-6 text-white animate-spin" />
+                       </div>
+                   </div>
+               )}
+               
+               <div>
+                   <h2 className="text-xl font-bold text-white mb-2">
+                       {isGenerating ? "Criando Código..." : "Compilando Plugin..."}
+                   </h2>
+                   <p className="text-sm text-gray-400">
+                       {isGenerating 
+                         ? "A IA está analisando sua solicitação e escrevendo os arquivos." 
+                         : `O GitHub Actions está construindo seu JAR. (${Math.floor(buildProgress)}%)`}
+                   </p>
+               </div>
+
+               {isBuilding && (
+                   <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden mt-2">
+                       <div className="h-full bg-mc-green transition-all duration-300" style={{width: `${buildProgress}%`}}></div>
+                   </div>
+               )}
+           </div>
+        </div>
+      )}
 
       {currentUser && (
         <>
@@ -324,6 +370,7 @@ const App: React.FC = () => {
                         currentRepo={currentRepo} currentProject={projectData}
                         onProjectGenerated={setProjectData} currentUser={currentUser}
                         isBuilding={isBuilding} onCommitTriggered={handleCommitTriggered}
+                        isGenerating={isGenerating} setIsGenerating={setIsGenerating}
                     />
                 </div>
                 <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
@@ -333,8 +380,8 @@ const App: React.FC = () => {
                         onAddToContext={() => {}} 
                     />
                     
-                    {/* Barra de Progresso do Build */}
-                    {isBuilding && (
+                    {/* Barra de Progresso do Build (Redundante com Overlay mas útil se o overlay for removido no futuro) */}
+                    {isBuilding && !showOverlay && (
                         <div className="bg-[#252526] border-t border-[#333] px-4 py-2">
                             <div className="flex justify-between text-xs text-white mb-1 font-mono">
                                 <span>BUILD EM ANDAMENTO (Run #{lastRunId || '...'})</span>

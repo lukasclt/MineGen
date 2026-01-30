@@ -35,23 +35,11 @@ export const generatePluginCode = async (
   signal?: AbortSignal
 ): Promise<GeneratedProject> => {
   
-  let baseUrl = 'https://openrouter.ai/api/v1';
-  let apiKey = '';
-  let providerHeader = {};
-
-  if (settings.aiProvider === AIProvider.GITHUB_COPILOT) {
-      baseUrl = 'https://models.inference.ai.azure.com';
-      apiKey = currentUser?.githubToken || '';
-      if (!apiKey) throw new Error("Token do GitHub não encontrado.");
-  } else {
-      baseUrl = 'https://openrouter.ai/api/v1';
-      apiKey = currentUser?.savedApiKey || process.env.API_KEY || '';
-      if (!apiKey) throw new Error("API Key do OpenRouter não encontrada.");
-      providerHeader = {
-          'HTTP-Referer': window.location.origin,
-          'X-Title': 'MineGen AI Cloud',
-      };
-  }
+  // GitHub Copilot / Azure Inference Endpoint
+  const baseUrl = 'https://models.inference.ai.azure.com';
+  const apiKey = currentUser?.githubToken || '';
+  
+  if (!apiKey) throw new Error("Token do GitHub não encontrado. Conecte sua conta.");
 
   // --- CONTEXTO TRADUZIDO PARA PT-BR ---
   const projectContext = `
@@ -151,22 +139,21 @@ ${prompt}
   });
 
   try {
-    console.log(`[AI] Req: ${settings.aiProvider} / ${settings.aiModel}`);
+    console.log(`[AI] Generating with model: ${settings.aiModel}`);
     
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        ...providerHeader
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: settings.aiModel,
+        model: settings.aiModel, // Should be 'gpt-4o'
         messages: [
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: contentArray }
         ],
-        response_format: (settings.aiModel?.includes('gpt') || settings.aiModel?.includes('gemini')) ? { type: "json_object" } : undefined,
+        response_format: { type: "json_object" },
         temperature: 0.2,
         max_tokens: 4096,
       }),
@@ -180,7 +167,7 @@ ${prompt}
         const errJson = JSON.parse(errorText);
         errorMsg = errJson.error?.message || errorMsg;
       } catch {}
-      throw new Error(`AI Provider Error: ${errorMsg}`);
+      throw new Error(`GitHub Copilot Error: ${errorMsg}`);
     }
 
     const data = await response.json();

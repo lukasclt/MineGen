@@ -4,11 +4,7 @@ import { Platform, JavaVersion, PluginSettings, BuildSystem, AIProvider } from '
 export const OPENROUTER_MODELS = [];
 
 export const GITHUB_COPILOT_MODELS = [
-  { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', provider: 'Anthropic' },
-  { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'OpenAI' },
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-  { id: 'gpt-5-mini', name: 'GPT-5 mini', provider: 'OpenAI' },
-  { id: 'raptor-mini', name: 'Raptor mini (Preview)', provider: 'Raptor' }
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' }
 ];
 
 export const DEFAULT_SETTINGS: PluginSettings = {
