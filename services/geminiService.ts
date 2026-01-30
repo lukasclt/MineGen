@@ -63,16 +63,6 @@ export const generatePluginCode = async (
 - **Sistema de Build**: ${settings.buildSystem}
 - **Group ID**: ${settings.groupId}
 - **Artifact ID**: ${settings.artifactId}
-
-# REGRA DE CONFIGURAÇÃO GRADLE
-Você DEVE configurar o 'build.gradle' para usar explicitamente **Java ${settings.javaVersion}**.
-Exemplo para Java 17:
-\`\`\`groovy
-java {
-    toolchain.languageVersion.set(JavaLanguageVersion.of(17))
-}
-\`\`\`
-Certifique-se que a task de build seja compatível com o GitHub Actions rodando Java ${settings.javaVersion}.
   `;
 
   let userPromptContext = "";
@@ -84,8 +74,10 @@ Certifique-se que a task de build seja compatível com o GitHub Actions rodando 
     let fileContext = "";
     let skippedCount = 0;
 
+    // Prioriza .github/workflows para que a IA saiba se o build existe
     const sortedFiles = [...previousProject.files].sort((a, b) => {
         const getScore = (f: GeneratedFile) => {
+            if (f.path.includes('.github/workflows')) return 200; // ALTA PRIORIDADE PARA CI
             if (f.path.endsWith('build.gradle') || f.path.endsWith('pom.xml')) return 100;
             if (f.path.endsWith('plugin.yml') || f.path.endsWith('paper-plugin.yml')) return 90;
             if (f.path.endsWith('Main.java')) return 80;
@@ -108,24 +100,19 @@ Certifique-se que a task de build seja compatível com o GitHub Actions rodando 
         }
     }
 
-    if (skippedCount > 0) {
-        fileContext += `\n[NOTA: ${skippedCount} arquivos menos críticos foram omitidos para caber no limite.]\n`;
-    }
-
     userPromptContext = `
 ${projectContext}
 
-# CÓDIGO EXISTENTE (Parcialmente Carregado)
-O usuário quer alterar um projeto existente. Analise os arquivos abaixo:
+# CÓDIGO EXISTENTE
 ${fileContext}
+${skippedCount > 0 ? `\n[... ${skippedCount} arquivos omitidos ...]` : ''}
 
 # PEDIDO DO USUÁRIO
 ${prompt}
 
-# INSTRUÇÕES
-- Modifique os arquivos ou crie novos.
+# INSTRUÇÕES ADICIONAIS
+- Se o usuário pediu para consertar o "Build" ou "Actions", VERIFIQUE SE O ARQUIVO .github/workflows/gradle.yml ESTÁ PRESENTE E CORRETO. Se não, CRIE-O com permissões de 'contents: write'.
 - Responda em Português.
-- Mantenha funcionalidades existentes a menos que pedido o contrário.
     `;
   } else {
     userPromptContext = `
@@ -139,9 +126,8 @@ ${prompt}
 
 # INSTRUÇÕES
 - Crie a estrutura completa do projeto.
-- Inclua 'plugin.yml' (ou equivalente).
-- Inclua 'build.gradle' configurado.
-- Crie a classe Main e pacotes necessários.
+- OBRIGATÓRIO: Crie '.github/workflows/gradle.yml' para CI/CD com auto-release.
+- Inclua 'plugin.yml' e 'build.gradle'.
 - Responda em Português.
     `;
   }

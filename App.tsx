@@ -34,22 +34,49 @@ const App: React.FC = () => {
 
   const addLog = (msg: string) => setTerminalLogs(prev => [...prev, msg]);
 
-  // Auth Load
+  // --- PERSISTÊNCIA (COOKIES/LOCALSTORAGE) ---
+
+  // Carregar usuário
   useEffect(() => {
-     const saved = localStorage.getItem('minegen_user_github');
-     if (saved) {
-         setCurrentUser(JSON.parse(saved));
+     const savedUser = localStorage.getItem('minegen_user_github');
+     if (savedUser) {
+         setCurrentUser(JSON.parse(savedUser));
          setIsAuthOpen(false);
      }
   }, []);
 
-  // Repo Load
+  // Carregar último repo e histórico
+  useEffect(() => {
+     if (currentUser && !currentRepo) {
+        const savedRepo = localStorage.getItem(`minegen_last_repo_${currentUser.id}`);
+        if (savedRepo) {
+             const repo = JSON.parse(savedRepo);
+             setCurrentRepo(repo);
+             handleSelectRepo(repo, true); // true = skip fetching files initially if wanted, but lets fetch to be safe
+        }
+     }
+  }, [currentUser]);
+
+  // Salvar usuário
   useEffect(() => {
      if (currentUser) {
          localStorage.setItem('minegen_user_github', JSON.stringify(currentUser));
          refreshRepos();
+     } else {
+         localStorage.removeItem('minegen_user_github');
      }
   }, [currentUser]);
+
+  // Salvar Repo e Chat
+  useEffect(() => {
+      if (currentUser && currentRepo) {
+          localStorage.setItem(`minegen_last_repo_${currentUser.id}`, JSON.stringify(currentRepo));
+          // Salva histórico de chat específico deste repo
+          localStorage.setItem(`minegen_chat_${currentRepo.id}`, JSON.stringify(messages));
+      }
+  }, [currentRepo, messages, currentUser]);
+
+  // --- FUNÇÕES ---
 
   const refreshRepos = async () => {
       if (!currentUser) return;
@@ -73,6 +100,7 @@ const App: React.FC = () => {
           const newRepo = await createRepository(currentUser.githubToken, name, "Projeto MineGen AI");
           setRepos(prev => [newRepo, ...prev]);
           setCurrentRepo(newRepo);
+          setMessages([]); // Novo repo, chat limpo
           
           addLog(`Inicializando estrutura Gradle com Java ${settings.javaVersion} e Auto-Release...`);
           const initialFiles: GeneratedFile[] = [
@@ -89,13 +117,22 @@ const App: React.FC = () => {
       }
   };
 
-  const handleSelectRepo = async (repo: GitHubRepo) => {
+  const handleSelectRepo = async (repo: GitHubRepo, isAutoLoad = false) => {
       setCurrentRepo(repo);
+      
+      // Carrega chat salvo
+      const savedChat = localStorage.getItem(`minegen_chat_${repo.id}`);
+      if (savedChat) {
+          setMessages(JSON.parse(savedChat));
+      } else if (!isAutoLoad) {
+          setMessages([]);
+      }
+
       setProjectData(null);
-      setMessages([]);
       if (!currentUser) return;
 
-      addLog(`Lendo arquivos de ${repo.name} (Modo Otimizado)...`);
+      if (!isAutoLoad) addLog(`Lendo arquivos de ${repo.name}...`);
+      
       try {
           const files = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name);
           setProjectData({
@@ -106,14 +143,16 @@ const App: React.FC = () => {
           });
           
           if (files.length > 0) {
-              addLog(`✅ Projeto carregado: ${files.length} arquivos.`);
-              playSound('success');
+              if (!isAutoLoad) {
+                  addLog(`✅ Projeto carregado: ${files.length} arquivos.`);
+                  playSound('success');
+              }
           } else {
               addLog("Repositório vazio. Use o chat para gerar o código inicial.");
           }
       } catch (e: any) {
           addLog(`Erro ao ler repositório: ${e.message}`);
-          playSound('error');
+          if (!isAutoLoad) playSound('error');
       }
   };
 
@@ -135,13 +174,15 @@ const App: React.FC = () => {
           interval = setInterval(() => {
               setBuildTimeElapsed(prev => prev + 1);
               setBuildProgress(prev => {
-                  // Simula progresso logarítmico até 90%, depois espera o GitHub
-                  if (prev < 90) return prev + (Math.random() * 2); 
+                  // Simula progresso logarítmico até 95%
+                  if (prev < 95) return prev + (Math.random() * 1.5); 
                   return prev;
               });
           }, 1000);
       } else {
-          setBuildProgress(100);
+          if (!isBuilding && buildProgress > 0 && buildProgress < 100) {
+              setBuildProgress(100);
+          }
       }
       return () => clearInterval(interval);
   }, [isBuilding]);
@@ -158,15 +199,17 @@ const App: React.FC = () => {
 
               if (lastRunId === null || run.id !== lastRunId) {
                   setLastRunId(run.id);
-                  addLog(`🔨 GitHub Actions: Build #${run.id} iniciado.`);
+                  addLog(`🔨 GitHub Actions: Build #${run.id} detectado.`);
               }
 
               if (run.status === 'in_progress') {
-                  const estimatedTotal = 90; // média de 90s
+                  const estimatedTotal = 90; // média de 90s para build Gradle
                   const remaining = Math.max(0, estimatedTotal - buildTimeElapsed);
-                  // Log apenas a cada ~10s para não spammar
-                  if (buildTimeElapsed % 10 === 0) {
-                     addLog(`⏳ Compilando... Tempo decorrido: ${buildTimeElapsed}s. (Est. restante: ${remaining}s)`);
+                  const progress = Math.min(99, Math.floor(buildProgress));
+                  
+                  // Log detalhado a cada ~5s
+                  if (buildTimeElapsed % 5 === 0) {
+                     addLog(`⏳ Compilando... ${progress}% (Decorridos: ${buildTimeElapsed}s | Restante est.: ${remaining}s)`);
                   }
               }
 
@@ -176,16 +219,17 @@ const App: React.FC = () => {
                       setBuildProgress(100);
                       const tagVersion = `v1.0.${run.run_number}`;
                       
-                      addLog(`✅ Build #${run.id} Sucesso! (Tempo total: ${buildTimeElapsed}s)`);
-                      addLog(`📦 Release ${tagVersion} gerada e publicada no GitHub!`);
-                      addLog(`⬇️ Baixe o JAR na aba 'Releases' do seu repositório.`);
+                      addLog(`✅ Build #${run.id} Sucesso! (100% - Tempo total: ${buildTimeElapsed}s)`);
+                      addLog(`📦 Release ${tagVersion} publicada!`);
+                      addLog(`⬇️ Download disponível na aba 'Releases' do GitHub.`);
                       
                       playSound('success');
-                      speakText("Build concluído com sucesso. Release publicada.");
+                      speakText("Build e Release concluídos com sucesso.");
                   } else if (run.conclusion === 'failure') {
                       setIsBuilding(false);
                       addLog(`❌ Build #${run.id} Falhou após ${buildTimeElapsed}s.`);
                       playSound('error');
+                      speakText("O build falhou.");
                       handleAutoFix(run.id);
                   }
               }
@@ -206,13 +250,12 @@ const App: React.FC = () => {
           
           const errorMsg: ChatMessage = {
               role: 'user',
-              text: `O build falhou! Analise estes logs e corrija o código:\n\n${logs}`,
+              text: `O build falhou! Analise estes logs e corrija o código (verifique se .github/workflows/gradle.yml está correto):\n\n${logs}`,
               id: Date.now().toString()
           };
           setMessages(prev => [...prev, errorMsg]);
           
           addLog("🤖 IA analisando erro e gerando correção...");
-          speakText("O build falhou. Analisando erro.");
           
           const fix = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
           
@@ -278,7 +321,7 @@ const App: React.FC = () => {
                         <div className="bg-[#252526] border-t border-[#333] px-4 py-2">
                             <div className="flex justify-between text-xs text-white mb-1 font-mono">
                                 <span>BUILD EM ANDAMENTO (Run #{lastRunId || '...'})</span>
-                                <span>{Math.min(100, Math.floor(buildProgress))}%</span>
+                                <span>{Math.min(100, Math.floor(buildProgress))}% (Est: {90 - buildTimeElapsed}s)</span>
                             </div>
                             <div className="w-full bg-[#333] h-2 rounded-full overflow-hidden">
                                 <div 
