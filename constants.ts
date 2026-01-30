@@ -11,7 +11,8 @@ export const OPENROUTER_MODELS = [
 export const GITHUB_COPILOT_MODELS = [
   { id: 'gpt-4o', name: 'GPT-4o (GitHub)', provider: 'GitHub' },
   { id: 'gpt-4o-mini', name: 'GPT-4o Mini (GitHub)', provider: 'GitHub' },
-  { id: 'Phi-3-medium-4k-instruct', name: 'Phi-3 Medium', provider: 'Microsoft' }
+  { id: 'Phi-3.5-mini-instruct', name: 'Phi-3.5 Mini', provider: 'Microsoft' },
+  { id: 'Llama-3.2-90B-Vision-Instruct', name: 'Llama 3.2 90B', provider: 'Meta' }
 ];
 
 export const DEFAULT_SETTINGS: PluginSettings = {

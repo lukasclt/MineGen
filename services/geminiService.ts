@@ -1,5 +1,5 @@
 
-import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User, AIProvider } from "../types";
+import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User, AIProvider, GeneratedFile } from "../types";
 import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
 /**
@@ -97,15 +97,49 @@ Ensure the build task is compatible with the GitHub Actions runner using Java ${
   `;
 
   if (previousProject && previousProject.files.length > 0) {
-    const fileContext = previousProject.files
-      .filter(f => !f.path.includes('.minegen') && !f.path.includes('gradlew'))
-      .map(f => `FILE: ${f.path}\n\`\`\`${f.language}\n${f.content}\n\`\`\``)
-      .join("\n\n");
-      
+    // --- CONTEXT PRUNING (Limitação de Contexto) ---
+    // GitHub Models Free Tier tem limites de ~8k tokens totais (prompt + resposta).
+    // Limitamos o contexto de entrada a ~20.000 caracteres (aprox 5k tokens) para deixar espaço.
+    
+    const MAX_CONTEXT_CHARS = 20000;
+    let currentChars = 0;
+    let fileContext = "";
+    let skippedCount = 0;
+
+    // Prioriza arquivos importantes: Build files > Java Source > Configs > Others
+    const sortedFiles = [...previousProject.files].sort((a, b) => {
+        const getScore = (f: GeneratedFile) => {
+            if (f.path.endsWith('build.gradle') || f.path.endsWith('pom.xml')) return 100;
+            if (f.path.endsWith('plugin.yml') || f.path.endsWith('paper-plugin.yml')) return 90;
+            if (f.path.endsWith('Main.java')) return 80;
+            if (f.path.endsWith('.java')) return 50;
+            return 10;
+        };
+        return getScore(b) - getScore(a);
+    });
+
+    for (const f of sortedFiles) {
+        // Ignora arquivos irrelevantes para a IA
+        if (f.path.includes('.minegen') || f.path.includes('gradlew') || f.path.endsWith('.lock')) continue;
+        
+        const fileEntry = `FILE: ${f.path}\n\`\`\`${f.language}\n${f.content}\n\`\`\`\n\n`;
+        
+        if (currentChars + fileEntry.length < MAX_CONTEXT_CHARS) {
+            fileContext += fileEntry;
+            currentChars += fileEntry.length;
+        } else {
+            skippedCount++;
+        }
+    }
+
+    if (skippedCount > 0) {
+        fileContext += `\n[NOTE: ${skippedCount} less critical files were omitted to fit context limits. Focus on provided files.]\n`;
+    }
+
     userPromptContext = `
 ${projectContext}
 
-# EXISTING CODEBASE
+# EXISTING CODEBASE (Partially Loaded)
 The user is requesting changes to an existing project. Analyze the files below:
 ${fileContext}
 
@@ -172,7 +206,7 @@ ${prompt}
         // GitHub Models não suporta response_format json_object em todos os modelos, então enviamos apenas se for GPT/Gemini
         response_format: (settings.aiModel?.includes('gpt') || settings.aiModel?.includes('gemini')) ? { type: "json_object" } : undefined,
         temperature: 0.2, // Baixa temperatura para código preciso
-        max_tokens: 8192, // Permitir respostas longas para projetos complexos
+        max_tokens: 4096, // Ajustado para garantir que não estoure o limite total
       }),
       signal: signal // Passa o sinal para o fetch
     });
