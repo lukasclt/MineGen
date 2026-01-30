@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { PluginSettings, Platform, JavaVersion, GitHubRepo, BuildSystem, User, AIProvider } from '../types';
+import { PluginSettings, Platform, JavaVersion, GitHubRepo, BuildSystem, User, AIProvider, UsageStats } from '../types';
 import { MC_VERSIONS, GITHUB_COPILOT_MODELS } from '../constants';
 import { GitBranch, Plus, Sliders, LogOut, FolderGit2, RefreshCw, Github } from 'lucide-react';
 
@@ -19,12 +19,14 @@ interface ConfigSidebarProps {
   onCreateRepo: () => void;
   onRefreshRepos: () => void;
   isLoadingRepos: boolean;
+  usageStats?: UsageStats; // Nova prop opcional
 }
 
 const ConfigSidebar: React.FC<ConfigSidebarProps> = ({ 
   settings, setSettings, isOpen, toggleSidebar,
   currentUser, onLogout,
-  repos, currentRepoId, onSelectRepo, onCreateRepo, onRefreshRepos, isLoadingRepos
+  repos, currentRepoId, onSelectRepo, onCreateRepo, onRefreshRepos, isLoadingRepos,
+  usageStats
 }) => {
   const [activeTab, setActiveTab] = useState<'repos' | 'config'>('repos');
 
@@ -85,7 +87,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                     >
                         <FolderGit2 className={`w-4 h-4 ${currentRepoId === repo.id ? 'text-mc-accent' : 'text-gray-500'}`} />
                         <div className="flex-1 min-w-0">
-                            <h4 className={`text-sm font-medium truncate ${currentRepoId === repo.id ? 'text-white' : 'text-gray-400'}`}>{repo.name}</h4>
+                            {/* Mostra 'owner/repo' para diferenciar repositórios de colaboração */}
+                            <h4 className={`text-sm font-medium truncate ${currentRepoId === repo.id ? 'text-white' : 'text-gray-400'}`}>{repo.full_name}</h4>
                             <p className="text-[10px] text-gray-600 truncate">{new Date(repo.updated_at).toLocaleDateString()}</p>
                         </div>
                     </div>
@@ -110,6 +113,45 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                          GitHub Copilot
                     </div>
                 </div>
+
+                {/* Copilot Usage Stats */}
+                {usageStats && (
+                    <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-bold text-gray-400 uppercase">Copilot Usage</label>
+                            <Sliders className="w-3 h-3 text-gray-500" />
+                        </div>
+                        
+                        <div className="space-y-3">
+                            <div>
+                                <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                                    <span>Inline Suggestions</span>
+                                    <span>0%</span>
+                                </div>
+                                <div className="w-full h-1 bg-[#333] rounded-full overflow-hidden">
+                                    <div className="h-full bg-blue-500" style={{width: '0%'}}></div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                                    <span>Chat messages</span>
+                                    <span>{Math.floor((usageStats.used / usageStats.limit) * 100)}%</span>
+                                </div>
+                                <div className="w-full h-1 bg-[#333] rounded-full overflow-hidden">
+                                    <div 
+                                        className={`h-full transition-all duration-300 ${usageStats.used >= usageStats.limit ? 'bg-red-500' : 'bg-blue-500'}`} 
+                                        style={{width: `${Math.min(100, (usageStats.used / usageStats.limit) * 100)}%`}}
+                                    ></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <p className="text-[10px] text-gray-500 mt-2 pt-2 border-t border-[#333]">
+                            Allowance resets {usageStats.resetDate}.
+                        </p>
+                    </div>
+                )}
 
                 <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
                    <label className="text-xs font-bold text-gray-400 uppercase">

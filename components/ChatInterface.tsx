@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User, GitHubRepo } from '../types';
+import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User, GitHubRepo, UsageStats } from '../types';
 import { Send, Bot, User as UserIcon, AlertCircle, Loader2, CheckCircle2, FileText, Paperclip, X, GitCommit, GitPullRequest } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { commitToRepo } from '../services/githubService'; // Serviço GitHub
@@ -20,12 +20,17 @@ interface ChatInterfaceProps {
   // Estado de Geração da IA (Lifting State Up)
   isGenerating: boolean;
   setIsGenerating: (generating: boolean) => void;
+  // Uso
+  usageStats?: UsageStats;
+  incrementUsage?: () => void;
+  repoLoading?: boolean; // Novo prop para estado de loading do repo
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   settings, messages, setMessages, currentRepo, currentProject, onProjectGenerated,
   currentUser, isBuilding, onCommitTriggered,
-  isGenerating, setIsGenerating
+  isGenerating, setIsGenerating,
+  usageStats, incrementUsage, repoLoading
 }) => {
   const [input, setInput] = useState('');
   const [statusText, setStatusText] = useState('');
@@ -33,9 +38,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   // Estado unificado de "Ocupado"
-  const isBusy = isGenerating || isBuilding;
+  const isBusy = isGenerating || isBuilding || repoLoading;
+
+  const isQuotaExceeded = usageStats ? usageStats.used >= usageStats.limit : false;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -44,6 +52,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const handleSend = async () => {
      // Bloqueio de segurança
      if (isBusy) return;
+     if (isQuotaExceeded) return;
 
      if (!input.trim() && attachments.length === 0) return;
      if (!currentRepo || !currentUser) {
@@ -84,6 +93,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
          // 3. Atualiza UI e Dispara Build Loop
          onProjectGenerated(generated);
          onCommitTriggered(); // Avisa App para começar a monitorar o Build
+         incrementUsage && incrementUsage(); // Incrementa uso
          
          const aiMsg: ChatMessage = {
              id: Date.now().toString() + '_ai',
@@ -108,12 +118,42 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
      }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Shift + Enter OR Shift + Space (as requested) adds a new line
+      if ((e.key === 'Enter' || e.key === ' ') && e.shiftKey) {
+          e.preventDefault();
+          const target = e.target as HTMLTextAreaElement;
+          const start = target.selectionStart;
+          const end = target.selectionEnd;
+          
+          // Insere quebra de linha
+          const newValue = input.substring(0, start) + "\n" + input.substring(end);
+          setInput(newValue);
+          
+          // Corrige posição do cursor após renderização
+          setTimeout(() => {
+              if (textAreaRef.current) {
+                textAreaRef.current.selectionStart = textAreaRef.current.selectionEnd = start + 1;
+              }
+          }, 0);
+          return;
+      }
+
+      // Enter normal sends
+      if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSend();
+      }
+  };
+
   // Helper para placeholder dinâmico
   const getPlaceholder = () => {
+      if (isQuotaExceeded) return `Cota excedida. Reseta em ${usageStats?.resetDate}`;
+      if (repoLoading) return "Carregando repositório...";
       if (!currentRepo) return "Selecione um repositório...";
       if (isBuilding) return "Aguarde o build finalizar...";
       if (isGenerating) return "A IA está gerando código...";
-      return "Descreva as alterações...";
+      return "Descreva as alterações... (Shift+Enter para nova linha)";
   };
 
   return (
@@ -171,8 +211,29 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
          <div ref={messagesEndRef} />
       </div>
 
+      {/* BLOQUEIO DE COTA */}
+      {isQuotaExceeded && (
+        <div className="px-3 pb-3 bg-[#1e1e1e]">
+            <div className="p-3 bg-[#2d2020] border border-red-900/50 rounded-lg flex items-center justify-between animate-fade-in">
+                <div className="flex items-center gap-2 text-xs text-red-300">
+                    <AlertCircle className="w-4 h-4" />
+                    <div className="flex flex-col">
+                        <span className="font-bold">Cota de mensagens excedida.</span>
+                        <span className="text-[10px] opacity-70">Reseta em {usageStats?.resetDate}</span>
+                    </div>
+                </div>
+                <button 
+                  onClick={() => alert("Você será avisado quando a cota resetar!")}
+                  className="text-[10px] bg-red-900/50 hover:bg-red-800 text-white px-3 py-1.5 rounded border border-red-700 transition-colors"
+                >
+                    Avise-me
+                </button>
+            </div>
+        </div>
+      )}
+
       {/* INPUT */}
-      <div className="p-3 bg-[#1e1e1e] border-t border-[#333]">
+      <div className={`p-3 bg-[#1e1e1e] border-t border-[#333] ${isQuotaExceeded ? 'opacity-50 pointer-events-none' : ''}`}>
         {attachments.length > 0 && (
             <div className="flex gap-2 mb-2 overflow-x-auto">
                 {attachments.map((a, i) => (
@@ -183,8 +244,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 ))}
             </div>
         )}
-        <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2">
-           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-white" disabled={isBusy}>
+        <form onSubmit={e => { e.preventDefault(); handleSend(); }} className="flex gap-2 items-end">
+           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 mb-1 text-gray-400 hover:text-white" disabled={isBusy || isQuotaExceeded}>
                <Paperclip className={`w-5 h-5 ${isBusy ? 'opacity-50' : ''}`} />
            </button>
            <input type="file" multiple className="hidden" ref={fileInputRef} onChange={e => {
@@ -197,17 +258,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                }
            }} />
            
-           <input 
+           <textarea
+             ref={textAreaRef}
              value={input} 
-             onChange={e => setInput(e.target.value)} 
-             className={`flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 text-sm text-white outline-none focus:border-mc-accent ${isBusy ? 'opacity-50 cursor-not-allowed' : ''}`}
+             onChange={e => setInput(e.target.value)}
+             onKeyDown={handleKeyDown}
+             className={`flex-1 bg-[#252526] border border-[#333] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-mc-accent resize-none min-h-[40px] max-h-[120px] custom-scrollbar ${isBusy ? 'opacity-50 cursor-not-allowed' : ''}`}
              placeholder={getPlaceholder()}
-             disabled={!currentRepo || isBusy}
+             disabled={!currentRepo || isBusy || isQuotaExceeded}
+             rows={1}
            />
            <button 
              type="submit" 
-             disabled={(!input.trim() && attachments.length === 0) || isBusy} 
-             className="bg-mc-accent p-2 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+             disabled={(!input.trim() && attachments.length === 0) || isBusy || isQuotaExceeded} 
+             className="bg-mc-accent p-2 mb-1 rounded-lg text-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
            >
                {isBusy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
            </button>

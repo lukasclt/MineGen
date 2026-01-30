@@ -33,6 +33,12 @@ export interface User {
   savedApiKey?: string;
 }
 
+export interface UsageStats {
+  used: number;
+  limit: number;
+  resetDate: string;
+}
+
 export interface PluginSettings {
   name: string;
   groupId: string;

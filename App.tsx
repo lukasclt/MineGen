@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { PluginSettings, GeneratedProject, ChatMessage, User, GitHubRepo, GeneratedFile, AIProvider } from './types';
+import { PluginSettings, GeneratedProject, ChatMessage, User, GitHubRepo, GeneratedFile, AIProvider, UsageStats } from './types';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [currentRepo, setCurrentRepo] = useState<GitHubRepo | null>(null);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [isRepoLoading, setIsRepoLoading] = useState(false); // Novo estado para bloquear chat na seleção
   
   const [projectData, setProjectData] = useState<GeneratedProject | null>(null);
   const [settings, setSettings] = useState<PluginSettings>(DEFAULT_SETTINGS);
@@ -38,6 +39,20 @@ const App: React.FC = () => {
 
   // IA Generation State (Lifting State Up)
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Copilot Usage State
+  const [usageStats, setUsageStats] = useState<UsageStats>({ 
+    used: 1, 
+    limit: 50, 
+    resetDate: 'February 27, 2026' 
+  });
+
+  const incrementUsage = () => {
+    setUsageStats(prev => ({ 
+        ...prev, 
+        used: Math.min(prev.limit, prev.used + 1) 
+    }));
+  };
 
   const addLog = (msg: string) => setTerminalLogs(prev => [...prev, msg]);
 
@@ -127,6 +142,7 @@ const App: React.FC = () => {
   };
 
   const handleSelectRepo = async (repo: GitHubRepo, isAutoLoad = false) => {
+      setIsRepoLoading(true);
       setCurrentRepo(repo);
       
       // Carrega chat salvo
@@ -151,11 +167,12 @@ const App: React.FC = () => {
       }
 
       setProjectData(null);
-      if (!currentUser) return;
-
-      if (!isAutoLoad) addLog(`Lendo arquivos de ${repo.name}...`);
       
       try {
+          if (!currentUser) return;
+
+          if (!isAutoLoad) addLog(`Lendo arquivos de ${repo.name}...`);
+          
           const files = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name);
           setProjectData({
               explanation: "Carregado do GitHub",
@@ -175,6 +192,8 @@ const App: React.FC = () => {
       } catch (e: any) {
           addLog(`Erro ao ler repositório: ${e.message}`);
           if (!isAutoLoad) playSound('error');
+      } finally {
+          setIsRepoLoading(false);
       }
   };
 
@@ -367,6 +386,7 @@ const App: React.FC = () => {
                 repos={repos} currentRepoId={currentRepo?.id || null}
                 onSelectRepo={handleSelectRepo} onCreateRepo={handleCreateRepo}
                 onRefreshRepos={refreshRepos} isLoadingRepos={isLoadingRepos}
+                usageStats={usageStats} // Passando uso
             />
 
             <div className="flex-1 flex flex-col md:flex-row h-full min-w-0">
@@ -377,6 +397,8 @@ const App: React.FC = () => {
                         onProjectGenerated={setProjectData} currentUser={currentUser}
                         isBuilding={isBuilding} onCommitTriggered={handleCommitTriggered}
                         isGenerating={isGenerating} setIsGenerating={setIsGenerating}
+                        usageStats={usageStats} incrementUsage={incrementUsage}
+                        repoLoading={isLoadingRepos || isRepoLoading} // Bloqueia chat se estiver carregando repo
                     />
                 </div>
                 <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
