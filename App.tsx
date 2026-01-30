@@ -226,10 +226,8 @@ const App: React.FC = () => {
                   const remaining = Math.max(0, estimatedTotal - buildTimeElapsed);
                   const progress = Math.min(99, Math.floor(buildProgress));
                   
-                  // Log detalhado a cada ~5s
-                  if (buildTimeElapsed % 5 === 0) {
-                     addLog(`⏳ Compilando... ${progress}% (Decorridos: ${buildTimeElapsed}s | Restante est.: ${remaining}s)`);
-                  }
+                  // Loga sempre que a verificação acontece (a cada 10s)
+                  addLog(`⏳ Compilando... ${progress}% (Decorridos: ${buildTimeElapsed}s | Restante est.: ${remaining}s)`);
               }
 
               if (run.status === 'completed') {
@@ -255,7 +253,7 @@ const App: React.FC = () => {
           } catch (e) {
               console.error("Erro polling build", e);
           }
-      }, 1000); // Check a cada 1s para detecção rápida
+      }, 10000); // Check a cada 10s para evitar spam e facilitar leitura
 
       return () => clearInterval(interval);
   }, [isBuilding, currentUser, currentRepo, lastRunId, buildTimeElapsed]);
