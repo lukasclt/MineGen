@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { PluginSettings, GeneratedProject, ChatMessage, User, GitHubRepo, GeneratedFile } from './types';
+import { PluginSettings, GeneratedProject, ChatMessage, User, GitHubRepo, GeneratedFile, AIProvider } from './types';
 import Sidebar from './components/ConfigSidebar';
 import ChatInterface from './components/ChatInterface';
 import CodeViewer from './components/CodeViewer';
@@ -67,14 +67,16 @@ const App: React.FC = () => {
      }
   }, [currentUser]);
 
-  // Salvar Repo e Chat
+  // Salvar Repo, Chat E SETTINGS específicas do Repo
   useEffect(() => {
       if (currentUser && currentRepo) {
           localStorage.setItem(`minegen_last_repo_${currentUser.id}`, JSON.stringify(currentRepo));
           // Salva histórico de chat específico deste repo
           localStorage.setItem(`minegen_chat_${currentRepo.id}`, JSON.stringify(messages));
+          // Salva Settings específicas (ex: Java Version)
+          localStorage.setItem(`minegen_settings_${currentRepo.id}`, JSON.stringify(settings));
       }
-  }, [currentRepo, messages, currentUser]);
+  }, [currentRepo, messages, currentUser, settings]);
 
   // --- FUNÇÕES ---
 
@@ -126,6 +128,21 @@ const App: React.FC = () => {
           setMessages(JSON.parse(savedChat));
       } else if (!isAutoLoad) {
           setMessages([]);
+      }
+
+      // Carrega Settings salvas (ex: Java Version)
+      const savedSettings = localStorage.getItem(`minegen_settings_${repo.id}`);
+      if (savedSettings) {
+          const parsed = JSON.parse(savedSettings);
+          // MIGRATION: Se estiver usando OpenRouter (removido), migra para Copilot
+          if (parsed.aiProvider === AIProvider.OPENROUTER || parsed.aiProvider === 'OpenRouter') {
+              parsed.aiProvider = AIProvider.GITHUB_COPILOT;
+              parsed.aiModel = 'gpt-4o';
+          }
+          setSettings(prev => ({...prev, ...parsed}));
+      } else {
+          // Se não tiver settings salvas, tenta inferir pelo nome ou usa padrão
+          setSettings(prev => ({...DEFAULT_SETTINGS, name: repo.name}));
       }
 
       setProjectData(null);

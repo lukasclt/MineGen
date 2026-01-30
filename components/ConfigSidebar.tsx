@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, GitHubRepo, BuildSystem, User, AIProvider } from '../types';
-import { MC_VERSIONS, OPENROUTER_MODELS, GITHUB_COPILOT_MODELS } from '../constants';
+import { MC_VERSIONS, GITHUB_COPILOT_MODELS } from '../constants';
 import { GitBranch, Plus, Trash2, Sliders, Box, LogOut, Settings2, FolderGit2, Loader2, RefreshCw, Cpu, Github, Globe } from 'lucide-react';
 
 interface ConfigSidebarProps {
@@ -34,10 +34,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
 
   const isConfigDisabled = !currentRepoId;
 
-  // Seleciona a lista de modelos baseado no provedor
-  const currentModelList = settings.aiProvider === AIProvider.GITHUB_COPILOT 
-    ? GITHUB_COPILOT_MODELS 
-    : OPENROUTER_MODELS;
+  // Lista de Modelos sempre do GitHub Copilot
+  const currentModelList = GITHUB_COPILOT_MODELS;
 
   return (
     <div className={`fixed inset-y-0 left-0 z-30 w-80 bg-[#1e1e1e] border-r border-[#333] transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 overflow-y-auto flex flex-col`}>
@@ -101,29 +99,9 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
 
         {activeTab === 'config' && (
            <div className="p-4 space-y-6">
-                {/* AI Provider Switch */}
-                <div className="space-y-2 bg-[#252526] p-3 rounded-md border border-[#333]">
-                    <label className="text-xs font-bold text-gray-400 uppercase flex items-center gap-2">
-                        <Cpu className="w-3 h-3" /> AI Provider
-                    </label>
-                    <div className="flex gap-2">
-                        <button 
-                            onClick={() => handleChange('aiProvider', AIProvider.OPENROUTER)}
-                            className={`flex-1 py-2 rounded text-xs font-bold flex items-center justify-center gap-1 transition-all ${settings.aiProvider === AIProvider.OPENROUTER ? 'bg-mc-accent text-white' : 'bg-[#1e1e1e] text-gray-500 hover:bg-[#333]'}`}
-                        >
-                            <Globe className="w-3 h-3" /> OpenRouter
-                        </button>
-                        <button 
-                            onClick={() => handleChange('aiProvider', AIProvider.GITHUB_COPILOT)}
-                            className={`flex-1 py-2 rounded text-xs font-bold flex items-center justify-center gap-1 transition-all ${settings.aiProvider === AIProvider.GITHUB_COPILOT ? 'bg-[#238636] text-white' : 'bg-[#1e1e1e] text-gray-500 hover:bg-[#333]'}`}
-                        >
-                            <Github className="w-3 h-3" /> Copilot
-                        </button>
-                    </div>
-                </div>
-
+                
                 <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
-                   <label className="text-xs font-bold text-gray-400 uppercase">Modelo de IA</label>
+                   <label className="text-xs font-bold text-gray-400 uppercase">Modelo de IA (GitHub Models)</label>
                    <select 
                      value={settings.aiModel} 
                      onChange={(e) => handleChange('aiModel', e.target.value)} 
@@ -133,15 +111,13 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                        <option key={model.id} value={model.id}>{model.name}</option>
                      ))}
                    </select>
-                   {settings.aiProvider === AIProvider.GITHUB_COPILOT && (
-                       <p className="text-[10px] text-green-400 mt-1">
-                           Usando sua conta GitHub conectada (GitHub Models).
-                       </p>
-                   )}
+                   <p className="text-[10px] text-green-400 mt-1">
+                       Usando sua conta GitHub conectada (GitHub Models).
+                   </p>
                 </div>
 
                 <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
-                   <label className="text-xs font-bold text-gray-400 uppercase">Java Version</label>
+                   <label className="text-xs font-bold text-gray-400 uppercase">Java Version (Build)</label>
                    <select 
                      value={settings.javaVersion} 
                      onChange={(e) => handleChange('javaVersion', e.target.value)} 
@@ -153,14 +129,8 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                      ))}
                    </select>
                    <p className="text-[10px] text-gray-500">
-                      O Gradle será configurado para usar esta versão no build.
+                      Isso configura o toolchain do Gradle e o GitHub Actions.
                    </p>
-                </div>
-
-                {/* Resto das configs */}
-                <div className="space-y-3">
-                   <label className="text-xs font-bold text-gray-400 uppercase">Nome do Projeto</label>
-                   <input value={settings.name} onChange={(e) => handleChange('name', e.target.value)} disabled={isConfigDisabled} className="w-full bg-[#252526] border border-[#333] rounded p-2 text-sm text-white" />
                 </div>
            </div>
         )}
