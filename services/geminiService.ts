@@ -56,8 +56,9 @@ export const generatePluginCode = async (
   let userPromptContext = "";
 
   if (previousProject && previousProject.files.length > 0) {
-    // Context Pruning (~20k chars)
-    const MAX_CONTEXT_CHARS = 20000;
+    // Context Pruning: Reduzido para evitar erro de 8k tokens.
+    // 9000 chars ~= 2250 tokens. Deixa espaço para system prompt, logs e output.
+    const MAX_CONTEXT_CHARS = 9000;
     let currentChars = 0;
     let fileContext = "";
     let skippedCount = 0;
@@ -141,6 +142,7 @@ ${prompt}
   try {
     console.log(`[AI] Generating with model: ${settings.aiModel}`);
     
+    // Reduz output tokens para garantir que caiba na janela se o input for grande
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -155,7 +157,7 @@ ${prompt}
         ],
         response_format: { type: "json_object" },
         temperature: 0.2,
-        max_tokens: 4096,
+        max_tokens: 4000, 
       }),
       signal: signal
     });

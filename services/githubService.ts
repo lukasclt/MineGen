@@ -258,7 +258,7 @@ export const getWorkflowRunLogs = async (token: string, owner: string, repo: str
     // GitHub pode redirecionar para S3, fetch segue automaticamente
     const text = await logsRes.text();
     
-    // Pegar apenas as últimas 150 linhas para não estourar contexto da IA
+    // Pegar apenas as últimas 80 linhas para não estourar contexto da IA (reduzido de 150)
     const lines = text.split('\n');
-    return lines.slice(-150).join('\n');
+    return lines.slice(-80).join('\n');
 };
