@@ -18,8 +18,7 @@ export const getAuthenticatedUser = async (token: string) => {
 };
 
 export const getUserRepos = async (token: string) => {
-    // Adicionado affiliation para garantir que repositórios de colaboração apareçam
-    // Aumentado per_page para 100 para pegar mais repositórios
+    // Busca repositórios onde o usuário é dono OU colaborador
     const res = await fetch(`${GITHUB_API_URL}/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member`, { headers: getHeaders(token) });
     if (!res.ok) throw new Error("Erro ao buscar repositórios");
     return await res.json();
@@ -221,6 +220,18 @@ export const commitToRepo = async (
 };
 
 // --- ACTIONS & BUILDS ---
+
+export const triggerWorkflow = async (token: string, owner: string, repo: string, branch: string = 'main') => {
+    const res = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/actions/workflows/gradle.yml/dispatches`, {
+        method: 'POST',
+        headers: getHeaders(token),
+        body: JSON.stringify({ ref: branch })
+    });
+    
+    if (!res.ok) {
+        throw new Error("Falha ao iniciar Build manual. Verifique se .github/workflows/gradle.yml existe.");
+    }
+};
 
 export const getLatestWorkflowRun = async (token: string, owner: string, repo: string) => {
     const res = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/actions/runs?per_page=1&exclude_pull_requests=true`, {

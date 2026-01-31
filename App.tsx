@@ -7,7 +7,7 @@ import CodeViewer from './components/CodeViewer';
 import Terminal from './components/Terminal';
 import AuthModal from './components/AuthModal';
 import { DEFAULT_SETTINGS, getGithubWorkflowYml } from './constants';
-import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo } from './services/githubService';
+import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo, triggerWorkflow } from './services/githubService';
 import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
 import { Loader2, Hammer, BrainCircuit, Clock } from 'lucide-react';
@@ -142,7 +142,7 @@ const App: React.FC = () => {
   };
 
   const handleSelectRepo = async (repo: GitHubRepo, isAutoLoad = false) => {
-      setIsRepoLoading(true);
+      setIsRepoLoading(true); // Bloqueia UI
       setCurrentRepo(repo);
       
       // Carrega chat salvo
@@ -193,7 +193,7 @@ const App: React.FC = () => {
           addLog(`Erro ao ler repositório: ${e.message}`);
           if (!isAutoLoad) playSound('error');
       } finally {
-          setIsRepoLoading(false);
+          setIsRepoLoading(false); // Desbloqueia UI
       }
   };
 
@@ -205,6 +205,19 @@ const App: React.FC = () => {
       setBuildTimeElapsed(0);
       addLog("------------------------------------------------");
       addLog(`🚀 Commit realizado! Iniciando espera de ${ESTIMATED_BUILD_TIME}s para o build...`);
+  };
+
+  const handleManualBuild = async () => {
+    if (!currentUser || !currentRepo) return;
+    try {
+        addLog("🚀 Disparando Build Manualmente...");
+        await triggerWorkflow(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, currentRepo.default_branch);
+        handleCommitTriggered(); // Reuses logic to start polling
+        playSound('click');
+    } catch (e: any) {
+        addLog(`Erro ao iniciar build: ${e.message}`);
+        playSound('error');
+    }
   };
 
   // Timer: Conta o tempo real em segundos
@@ -399,6 +412,7 @@ const App: React.FC = () => {
                         isGenerating={isGenerating} setIsGenerating={setIsGenerating}
                         usageStats={usageStats} incrementUsage={incrementUsage}
                         repoLoading={isLoadingRepos || isRepoLoading} // Bloqueia chat se estiver carregando repo
+                        onManualBuild={handleManualBuild}
                     />
                 </div>
                 <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">

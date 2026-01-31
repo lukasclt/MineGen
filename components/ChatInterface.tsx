@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ChatMessage, PluginSettings, GeneratedProject, Attachment, User, GitHubRepo, UsageStats } from '../types';
-import { Send, Bot, User as UserIcon, AlertCircle, Loader2, CheckCircle2, FileText, Paperclip, X, GitCommit, GitPullRequest } from 'lucide-react';
+import { Send, Bot, User as UserIcon, AlertCircle, Loader2, CheckCircle2, FileText, Paperclip, X, GitCommit, GitPullRequest, Hammer } from 'lucide-react';
 import { generatePluginCode } from '../services/geminiService';
 import { commitToRepo } from '../services/githubService'; // Serviço GitHub
 import { playSound } from '../services/audioService';
@@ -24,13 +24,15 @@ interface ChatInterfaceProps {
   usageStats?: UsageStats;
   incrementUsage?: () => void;
   repoLoading?: boolean; // Novo prop para estado de loading do repo
+  onManualBuild: () => void; // Novo prop para build manual
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ 
   settings, messages, setMessages, currentRepo, currentProject, onProjectGenerated,
   currentUser, isBuilding, onCommitTriggered,
   isGenerating, setIsGenerating,
-  usageStats, incrementUsage, repoLoading
+  usageStats, incrementUsage, repoLoading,
+  onManualBuild
 }) => {
   const [input, setInput] = useState('');
   const [statusText, setStatusText] = useState('');
@@ -153,7 +155,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (!currentRepo) return "Selecione um repositório...";
       if (isBuilding) return "Aguarde o build finalizar...";
       if (isGenerating) return "A IA está gerando código...";
-      return "Descreva as alterações... (Shift+Enter para nova linha)";
+      return "Descreva as alterações... (Shift+Space para nova linha)";
   };
 
   return (
@@ -167,12 +169,25 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                 {currentRepo ? currentRepo.name : 'Selecione um Repo'}
              </span>
          </div>
-         {isBuilding && (
-             <div className="flex items-center gap-2 text-xs text-yellow-400 animate-pulse">
-                 <Loader2 className="w-3 h-3 animate-spin" />
-                 Building on GitHub Actions...
-             </div>
-         )}
+         
+         <div className="flex items-center gap-2">
+             <button 
+                onClick={onManualBuild}
+                disabled={isBusy || !currentRepo} 
+                className="flex items-center gap-1.5 px-3 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-200 text-xs rounded border border-blue-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Disparar Build Manualmente"
+             >
+                <Hammer className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Build</span>
+             </button>
+
+             {isBuilding && (
+                 <div className="flex items-center gap-2 text-xs text-yellow-400 animate-pulse ml-2">
+                     <Loader2 className="w-3 h-3 animate-spin" />
+                     <span className="hidden sm:inline">Building...</span>
+                 </div>
+             )}
+         </div>
       </div>
 
       {/* MENSAGENS */}
