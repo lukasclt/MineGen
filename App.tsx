@@ -12,8 +12,8 @@ import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
 import { Loader2, Hammer, BrainCircuit, Clock } from 'lucide-react';
 
-// Tempo estimado de build: 1 minuto e 30 segundos
-const ESTIMATED_BUILD_TIME = 90;
+// Tempo estimado de build: 1 minuto (60 segundos)
+const ESTIMATED_BUILD_TIME = 60;
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
