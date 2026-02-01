@@ -10,7 +10,7 @@ import { DEFAULT_SETTINGS, getGithubWorkflowYml } from './constants';
 import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo, triggerWorkflow } from './services/githubService';
 import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
-import { Loader2, Hammer, BrainCircuit, Clock } from 'lucide-react';
+import { Loader2, Hammer, BrainCircuit, Clock, ChevronDown, ExternalLink, X } from 'lucide-react';
 
 const ESTIMATED_BUILD_TIME = 60;
 
@@ -31,12 +31,12 @@ const App: React.FC = () => {
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   
   const [isBuilding, setIsBuilding] = useState(false);
+  const [showBuildOverlay, setShowBuildOverlay] = useState(false); // Novo: controla visibilidade do overlay separadamente
   const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [buildTimeElapsed, setBuildTimeElapsed] = useState(0);
 
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // --- CONTROLE DE USO REAL DO COPILOT ---
   const [usageStats, setUsageStats] = useState<UsageStats>(() => {
     const saved = localStorage.getItem('minegen_usage');
     return saved ? JSON.parse(saved) : { used: 0, limit: 50, resetDate: 'Verificando...' };
@@ -166,10 +166,11 @@ const App: React.FC = () => {
 
   const handleCommitTriggered = () => {
       setIsBuilding(true);
+      setShowBuildOverlay(true);
       setLastRunId(null);
       setBuildTimeElapsed(0);
       addLog("------------------------------------------------");
-      addLog(`🚀 Commit realizado! Iniciando espera de ${ESTIMATED_BUILD_TIME}s para o build...`);
+      addLog(`🚀 Operação iniciada. Monitorando GitHub Actions...`);
   };
 
   const handleManualBuild = async () => {
@@ -185,54 +186,62 @@ const App: React.FC = () => {
     }
   };
 
+  // Timer simples de segundos
   useEffect(() => {
       let interval: any;
       if (isBuilding) interval = setInterval(() => setBuildTimeElapsed(prev => prev + 1), 1000);
       return () => clearInterval(interval);
   }, [isBuilding]);
 
+  // MONITORAMENTO CONSTANTE (Polling de 5s fixo)
   useEffect(() => {
       if (!isBuilding || !currentUser || !currentRepo) return;
+
       const checkBuildStatus = async () => {
           try {
               const run = await getLatestWorkflowRun(currentUser.githubToken, currentRepo.owner.login, currentRepo.name);
+              
               if (!run) return;
+
+              // Detecta novo Run ID
               if (lastRunId === null || run.id !== lastRunId) {
                   setLastRunId(run.id);
-                  addLog(`🔨 GitHub Actions: Build #${run.id} detectado.`);
+                  addLog(`🔨 Build detectado: #${run.run_number} (${run.status})`);
               }
+
               if (run.status === 'completed') {
+                  setIsBuilding(false);
+                  setShowBuildOverlay(false);
+                  
                   if (run.conclusion === 'success') {
-                      setIsBuilding(false);
                       const tagVersion = `v1.0.${run.run_number}`;
-                      addLog(`✅ Build #${run.id} Sucesso! (Tempo total: ${buildTimeElapsed}s)`);
-                      addLog(`📦 Release ${tagVersion} publicada!`);
+                      addLog(`✅ Build #${run.run_number} Sucesso em ${buildTimeElapsed}s!`);
+                      addLog(`📦 Artefato disponível no GitHub Releases.`);
                       playSound('success');
-                      speakText("Build e Release concluídos com sucesso.");
-                  } else if (run.conclusion === 'failure') {
-                      setIsBuilding(false);
-                      addLog(`❌ Build #${run.id} Falhou após ${buildTimeElapsed}s.`);
+                      speakText("Plugin compilado com sucesso.");
+                  } else {
+                      addLog(`❌ Build #${run.run_number} Falhou.`);
                       playSound('error');
                       speakText("O build falhou.");
                       handleAutoFix(run.id);
                   }
               }
-          } catch (e) { console.error("Erro polling build", e); }
+          } catch (e) { 
+              console.error("Erro polling build", e); 
+          }
       };
-      let intervalId: any;
-      if (buildTimeElapsed >= ESTIMATED_BUILD_TIME) {
-          checkBuildStatus();
-          intervalId = setInterval(checkBuildStatus, 1000);
-      } else if (lastRunId === null) {
-          intervalId = setInterval(checkBuildStatus, 3000);
-      }
+
+      // Executa a cada 5 segundos cravados
+      const intervalId = setInterval(checkBuildStatus, 5000);
+      checkBuildStatus(); // Primeira execução imediata
+
       return () => clearInterval(intervalId);
-  }, [isBuilding, currentUser, currentRepo, lastRunId, buildTimeElapsed]);
+  }, [isBuilding, currentUser, currentRepo, lastRunId]);
 
   const handleAutoFix = async (runId: number) => {
       if (!currentUser || !currentRepo) return;
       try {
-          addLog("🔍 Baixando logs do erro...");
+          addLog("🔍 Analisando logs de erro...");
           const logs = await getWorkflowRunLogs(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, runId);
           const errorMsg: ChatMessage = {
               role: 'user',
@@ -240,51 +249,95 @@ const App: React.FC = () => {
               id: Date.now().toString()
           };
           setMessages(prev => [...prev, errorMsg]);
-          addLog("🤖 IA analisando erro e gerando correção...");
+          
+          setIsGenerating(true);
+          addLog("🤖 IA gerando correção automática...");
+          
           const { project: fix, usage } = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
           updateUsage(usage);
-          addLog("🛠️ Aplicando correção no GitHub...");
+          
+          addLog("🛠️ Aplicando correção e reiniciando build...");
           await commitToRepo(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, fix.files, fix.commitTitle || "fix: correção de build", fix.commitDescription || "Correção automática.");
+          
           const aiResponse: ChatMessage = { role: 'model', text: `Corrigi o erro: ${fix.explanation}. Novo build disparado.`, projectData: fix, id: Date.now().toString() + '_fix' };
           setMessages(prev => [...prev, aiResponse]);
           setProjectData(fix);
+          
+          setIsGenerating(false);
           handleCommitTriggered();
-      } catch (e: any) { addLog(`Falha fatal na auto-correção: ${e.message}`); }
+      } catch (e: any) { 
+          setIsGenerating(false);
+          addLog(`Falha na auto-correção: ${e.message}`); 
+      }
   };
 
-  const showOverlay = isGenerating || isBuilding;
   const visualProgress = Math.min(100, (buildTimeElapsed / ESTIMATED_BUILD_TIME) * 100);
   const remainingSeconds = Math.max(0, ESTIMATED_BUILD_TIME - buildTimeElapsed);
 
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden relative">
       <AuthModal isOpen={isAuthOpen} onAuthSuccess={(u) => { setCurrentUser(u); setIsAuthOpen(false); }} />
-      {showOverlay && (
-        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center flex-col animate-fade-in">
+      
+      {/* OVERLAY DE GERAÇÃO (IA) */}
+      {isGenerating && (
+        <div className="absolute inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center flex-col animate-fade-in">
            <div className="bg-[#252526] p-8 rounded-xl border border-[#444] shadow-2xl flex flex-col items-center gap-4 max-w-sm w-full text-center">
-               {isGenerating ? (
-                   <div className="relative">
-                       <BrainCircuit className="w-16 h-16 text-mc-accent animate-pulse" />
-                       <div className="absolute -bottom-1 -right-1"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>
-                   </div>
-               ) : (
-                   <div className="relative">
-                       <Clock className="w-16 h-16 text-mc-gold animate-bounce" />
-                       <div className="absolute -bottom-1 -right-1"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>
-                   </div>
-               )}
-               <div>
-                   <h2 className="text-xl font-bold text-white mb-2">{isGenerating ? "Criando Código..." : "Compilando Plugin..."}</h2>
-                   <p className="text-sm text-gray-400">{isGenerating ? "A IA está analisando sua solicitação..." : `Aguardando GitHub Actions... (${remainingSeconds}s)`}</p>
-               </div>
-               {isBuilding && (
-                   <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden mt-2">
-                       <div className="h-full bg-mc-green transition-all duration-1000 linear" style={{width: `${visualProgress}%`}}></div>
-                   </div>
-               )}
+                <div className="relative">
+                    <BrainCircuit className="w-16 h-16 text-mc-accent animate-pulse" />
+                    <div className="absolute -bottom-1 -right-1"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>
+                </div>
+                <div>
+                   <h2 className="text-xl font-bold text-white mb-2">IA Pensando...</h2>
+                   <p className="text-sm text-gray-400">Escrevendo o código do seu plugin.</p>
+                </div>
            </div>
         </div>
       )}
+
+      {/* OVERLAY DE BUILD (GITHUB) */}
+      {showBuildOverlay && isBuilding && (
+        <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center flex-col animate-fade-in">
+           <div className="bg-[#252526] p-8 rounded-xl border border-[#444] shadow-2xl flex flex-col items-center gap-4 max-w-sm w-full text-center">
+               <div className="relative">
+                   <Clock className="w-16 h-16 text-mc-gold animate-bounce" />
+                   <div className="absolute -bottom-1 -right-1"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>
+               </div>
+               <div className="w-full">
+                   <h2 className="text-xl font-bold text-white mb-1">Compilando Plugin</h2>
+                   <p className="text-[11px] text-gray-500 uppercase tracking-widest mb-4">GitHub Actions #{lastRunId || '---'}</p>
+                   
+                   <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden mb-2">
+                       <div className="h-full bg-mc-green transition-all duration-1000 linear" style={{width: `${visualProgress}%`}}></div>
+                   </div>
+                   
+                   <p className="text-xs text-gray-400 mb-6">
+                       {buildTimeElapsed < ESTIMATED_BUILD_TIME 
+                         ? `Tempo estimado: ~${remainingSeconds}s` 
+                         : "O build está demorando mais que o esperado..."}
+                   </p>
+
+                   <div className="flex flex-col gap-2">
+                        <button 
+                            onClick={() => setShowBuildOverlay(false)}
+                            className="w-full py-2.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            <ChevronDown className="w-4 h-4" /> Continuar em Segundo Plano
+                        </button>
+                        {currentRepo && (
+                            <a 
+                                href={`${currentRepo.html_url}/actions`} 
+                                target="_blank" 
+                                className="text-[10px] text-mc-accent hover:underline flex items-center justify-center gap-1"
+                            >
+                                Ver no GitHub <ExternalLink className="w-3 h-3" />
+                            </a>
+                        )}
+                   </div>
+               </div>
+           </div>
+        </div>
+      )}
+
       {currentUser && (
         <>
             <Sidebar 
@@ -311,6 +364,28 @@ const App: React.FC = () => {
                 </div>
                 <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
                     <CodeViewer project={projectData} settings={settings} directoryHandle={null} onAddToContext={() => {}} />
+                    
+                    {/* Barra de Progresso Compacta Inferior (Sempre visível se estiver buildando) */}
+                    {isBuilding && (
+                        <div 
+                            className="bg-[#1e1e1e] border-t border-[#333] px-4 py-2 cursor-pointer hover:bg-[#252526] transition-colors"
+                            onClick={() => setShowBuildOverlay(true)}
+                        >
+                            <div className="flex justify-between items-center text-[10px] text-mc-gold font-mono mb-1">
+                                <div className="flex items-center gap-2">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    <span className="font-bold">GITHUB BUILD EM CURSO</span>
+                                    <span className="text-gray-600">|</span>
+                                    <span>RUN #{lastRunId || 'PENDENTE'}</span>
+                                </div>
+                                <span>{buildTimeElapsed}s decorridos</span>
+                            </div>
+                            <div className="w-full bg-[#111] h-1 rounded-full overflow-hidden">
+                                <div className="bg-mc-green h-full transition-all duration-1000" style={{width: `${visualProgress}%`}}></div>
+                            </div>
+                        </div>
+                    )}
+
                     <Terminal logs={terminalLogs} isOpen={true} onClose={() => {}} onClear={() => setTerminalLogs([])} onAddLog={addLog} />
                 </div>
             </div>
