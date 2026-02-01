@@ -1,5 +1,5 @@
 
-import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User, AIProvider, GeneratedFile } from "../types";
+import { PluginSettings, GeneratedProject, Attachment, BuildSystem, User, AIProvider, GeneratedFile, UsageStats } from "../types";
 import { SYSTEM_INSTRUCTION, GRADLEW_UNIX, GRADLEW_BAT, GRADLE_WRAPPER_PROPERTIES } from "../constants";
 
 function extractJson(text: string): any {
@@ -33,15 +33,13 @@ export const generatePluginCode = async (
   attachments: Attachment[] = [],
   currentUser?: User | null,
   signal?: AbortSignal
-): Promise<GeneratedProject> => {
+): Promise<{ project: GeneratedProject, usage: UsageStats }> => {
   
-  // GitHub Copilot / Azure Inference Endpoint
   const baseUrl = 'https://models.inference.ai.azure.com';
   const apiKey = currentUser?.githubToken || '';
   
   if (!apiKey) throw new Error("Token do GitHub não encontrado. Conecte sua conta.");
 
-  // --- CONTEXTO TRADUZIDO PARA PT-BR ---
   const projectContext = `
 # CONTEXTO DO PROJETO
 - **Nome**: ${settings.name}
@@ -56,17 +54,14 @@ export const generatePluginCode = async (
   let userPromptContext = "";
 
   if (previousProject && previousProject.files.length > 0) {
-    // Context Pruning: Reduzido para evitar erro de 8k tokens.
-    // 9000 chars ~= 2250 tokens. Deixa espaço para system prompt, logs e output.
     const MAX_CONTEXT_CHARS = 9000;
     let currentChars = 0;
     let fileContext = "";
     let skippedCount = 0;
 
-    // Prioriza .github/workflows para que a IA saiba se o build existe
     const sortedFiles = [...previousProject.files].sort((a, b) => {
         const getScore = (f: GeneratedFile) => {
-            if (f.path.includes('.github/workflows')) return 200; // ALTA PRIORIDADE PARA CI
+            if (f.path.includes('.github/workflows')) return 200;
             if (f.path.endsWith('build.gradle') || f.path.endsWith('pom.xml')) return 100;
             if (f.path.endsWith('plugin.yml') || f.path.endsWith('paper-plugin.yml')) return 90;
             if (f.path.endsWith('Main.java')) return 80;
@@ -78,9 +73,7 @@ export const generatePluginCode = async (
 
     for (const f of sortedFiles) {
         if (f.path.includes('.minegen') || f.path.includes('gradlew') || f.path.endsWith('.lock')) continue;
-        
         const fileEntry = `ARQUIVO: ${f.path}\n\`\`\`${f.language}\n${f.content}\n\`\`\`\n\n`;
-        
         if (currentChars + fileEntry.length < MAX_CONTEXT_CHARS) {
             fileContext += fileEntry;
             currentChars += fileEntry.length;
@@ -91,28 +84,22 @@ export const generatePluginCode = async (
 
     userPromptContext = `
 ${projectContext}
-
 # CÓDIGO EXISTENTE
 ${fileContext}
 ${skippedCount > 0 ? `\n[... ${skippedCount} arquivos omitidos ...]` : ''}
-
 # PEDIDO DO USUÁRIO
 ${prompt}
-
 # INSTRUÇÕES ADICIONAIS
-- Se o usuário pediu para consertar o "Build" ou "Actions", VERIFIQUE SE O ARQUIVO .github/workflows/gradle.yml ESTÁ PRESENTE E CORRETO. Se não, CRIE-O com permissões de 'contents: write'.
+- Se o usuário pediu para consertar o "Build" ou "Actions", VERIFIQUE SE O ARQUIVO .github/workflows/gradle.yml ESTÁ PRESENTE E CORRETO.
 - Responda em Português.
     `;
   } else {
     userPromptContext = `
 ${projectContext}
-
 # NOVO PROJETO
 O usuário quer criar um plugin do zero.
-
 # REQUISITOS DO USUÁRIO
 ${prompt}
-
 # INSTRUÇÕES
 - Crie a estrutura completa do projeto.
 - OBRIGATÓRIO: Crie '.github/workflows/gradle.yml' para CI/CD com auto-release.
@@ -127,22 +114,13 @@ ${prompt}
 
   attachments.forEach(att => {
     if (att.type === 'image') {
-      contentArray.push({
-        type: "image_url",
-        image_url: { url: att.content }
-      });
+      contentArray.push({ type: "image_url", image_url: { url: att.content } });
     } else {
-      contentArray.push({
-        type: "text",
-        text: `\n--- ANEXO: ${att.name} ---\n${att.content}\n`
-      });
+      contentArray.push({ type: "text", text: `\n--- ANEXO: ${att.name} ---\n${att.content}\n` });
     }
   });
 
   try {
-    console.log(`[AI] Generating with model: ${settings.aiModel}`);
-    
-    // Reduz output tokens para garantir que caiba na janela se o input for grande
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -150,7 +128,7 @@ ${prompt}
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: settings.aiModel, // Should be 'gpt-4o'
+        model: settings.aiModel,
         messages: [
           { role: "system", content: SYSTEM_INSTRUCTION },
           { role: "user", content: contentArray }
@@ -161,6 +139,17 @@ ${prompt}
       }),
       signal: signal
     });
+
+    // --- CAPTURA DE USO REAL DO GITHUB ---
+    const limit = parseInt(response.headers.get('x-ratelimit-limit-requests') || '50');
+    const remaining = parseInt(response.headers.get('x-ratelimit-remaining-requests') || '50');
+    const resetEpoch = parseInt(response.headers.get('x-ratelimit-reset-requests') || '0');
+    
+    const usage: UsageStats = {
+      used: limit - remaining,
+      limit: limit,
+      resetDate: resetEpoch ? new Date(resetEpoch * 1000).toLocaleString('pt-BR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'em breve'
+    };
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -179,7 +168,6 @@ ${prompt}
 
     if (!project.files) throw new Error("JSON inválido: sem arquivos.");
 
-    // Wrapper injection
     if (settings.buildSystem === BuildSystem.GRADLE) {
         const hasWrapper = project.files.some(f => f.path.includes('gradlew'));
         if (!hasWrapper) {
@@ -191,10 +179,9 @@ ${prompt}
         }
     }
 
-    return project;
+    return { project, usage };
   } catch (e: any) {
     if (e.name === 'AbortError') throw new Error("Tempo limite excedido.");
-    console.error("AI Error:", e);
     throw new Error(e.message || "Falha na IA.");
   }
 };

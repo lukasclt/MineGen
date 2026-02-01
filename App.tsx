@@ -12,7 +12,6 @@ import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
 import { Loader2, Hammer, BrainCircuit, Clock } from 'lucide-react';
 
-// Tempo estimado de build: 1 minuto (60 segundos)
 const ESTIMATED_BUILD_TIME = 60;
 
 const App: React.FC = () => {
@@ -22,7 +21,7 @@ const App: React.FC = () => {
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
   const [currentRepo, setCurrentRepo] = useState<GitHubRepo | null>(null);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
-  const [isRepoLoading, setIsRepoLoading] = useState(false); // Novo estado para bloquear chat na seleção
+  const [isRepoLoading, setIsRepoLoading] = useState(false);
   
   const [projectData, setProjectData] = useState<GeneratedProject | null>(null);
   const [settings, setSettings] = useState<PluginSettings>(DEFAULT_SETTINGS);
@@ -31,34 +30,28 @@ const App: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   
-  // Build & Release State
   const [isBuilding, setIsBuilding] = useState(false);
   const [lastRunId, setLastRunId] = useState<number | null>(null);
-  // buildProgress agora será derivado do tempo, não simulado aleatoriamente
   const [buildTimeElapsed, setBuildTimeElapsed] = useState(0);
 
-  // IA Generation State (Lifting State Up)
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Copilot Usage State
-  const [usageStats, setUsageStats] = useState<UsageStats>({ 
-    used: 1, 
-    limit: 50, 
-    resetDate: 'February 27, 2026' 
+  // --- CONTROLE DE USO REAL DO COPILOT ---
+  const [usageStats, setUsageStats] = useState<UsageStats>(() => {
+    const saved = localStorage.getItem('minegen_usage');
+    return saved ? JSON.parse(saved) : { used: 0, limit: 50, resetDate: 'Verificando...' };
   });
 
-  const incrementUsage = () => {
-    setUsageStats(prev => ({ 
-        ...prev, 
-        used: Math.min(prev.limit, prev.used + 1) 
-    }));
+  useEffect(() => {
+    localStorage.setItem('minegen_usage', JSON.stringify(usageStats));
+  }, [usageStats]);
+
+  const updateUsage = (newUsage: UsageStats) => {
+    setUsageStats(newUsage);
   };
 
   const addLog = (msg: string) => setTerminalLogs(prev => [...prev, msg]);
 
-  // --- PERSISTÊNCIA (COOKIES/LOCALSTORAGE) ---
-
-  // Carregar usuário
   useEffect(() => {
      const savedUser = localStorage.getItem('minegen_user_github');
      if (savedUser) {
@@ -67,19 +60,17 @@ const App: React.FC = () => {
      }
   }, []);
 
-  // Carregar último repo e histórico
   useEffect(() => {
      if (currentUser && !currentRepo) {
         const savedRepo = localStorage.getItem(`minegen_last_repo_${currentUser.id}`);
         if (savedRepo) {
              const repo = JSON.parse(savedRepo);
              setCurrentRepo(repo);
-             handleSelectRepo(repo, true); // true = skip fetching files initially if wanted, but lets fetch to be safe
+             handleSelectRepo(repo, true);
         }
      }
   }, [currentUser]);
 
-  // Salvar usuário
   useEffect(() => {
      if (currentUser) {
          localStorage.setItem('minegen_user_github', JSON.stringify(currentUser));
@@ -89,18 +80,13 @@ const App: React.FC = () => {
      }
   }, [currentUser]);
 
-  // Salvar Repo, Chat E SETTINGS específicas do Repo
   useEffect(() => {
       if (currentUser && currentRepo) {
           localStorage.setItem(`minegen_last_repo_${currentUser.id}`, JSON.stringify(currentRepo));
-          // Salva histórico de chat específico deste repo
           localStorage.setItem(`minegen_chat_${currentRepo.id}`, JSON.stringify(messages));
-          // Salva Settings específicas (ex: Java Version)
           localStorage.setItem(`minegen_settings_${currentRepo.id}`, JSON.stringify(settings));
       }
   }, [currentRepo, messages, currentUser, settings]);
-
-  // --- FUNÇÕES ---
 
   const refreshRepos = async () => {
       if (!currentUser) return;
@@ -124,7 +110,7 @@ const App: React.FC = () => {
           const newRepo = await createRepository(currentUser.githubToken, name, "Projeto MineGen AI");
           setRepos(prev => [newRepo, ...prev]);
           setCurrentRepo(newRepo);
-          setMessages([]); // Novo repo, chat limpo
+          setMessages([]);
           
           addLog(`Inicializando estrutura Gradle com Java ${settings.javaVersion} e Auto-Release...`);
           const initialFiles: GeneratedFile[] = [
@@ -142,27 +128,20 @@ const App: React.FC = () => {
   };
 
   const handleSelectRepo = async (repo: GitHubRepo, isAutoLoad = false) => {
-      setIsRepoLoading(true); // Bloqueia UI
+      setIsRepoLoading(true);
       setCurrentRepo(repo);
       
-      // Carrega chat salvo
       const savedChat = localStorage.getItem(`minegen_chat_${repo.id}`);
-      if (savedChat) {
-          setMessages(JSON.parse(savedChat));
-      } else if (!isAutoLoad) {
-          setMessages([]);
-      }
+      if (savedChat) setMessages(JSON.parse(savedChat));
+      else if (!isAutoLoad) setMessages([]);
 
-      // Carrega Settings salvas (ex: Java Version)
       const savedSettings = localStorage.getItem(`minegen_settings_${repo.id}`);
       if (savedSettings) {
           const parsed = JSON.parse(savedSettings);
-          // GARANTIR QUE SEMPRE USA GITHUB COPILOT
           parsed.aiProvider = AIProvider.GITHUB_COPILOT;
           parsed.aiModel = 'gpt-4o';
           setSettings(prev => ({...prev, ...parsed}));
       } else {
-          // Se não tiver settings salvas, tenta inferir pelo nome ou usa padrão
           setSettings(prev => ({...DEFAULT_SETTINGS, name: repo.name}));
       }
 
@@ -170,35 +149,21 @@ const App: React.FC = () => {
       
       try {
           if (!currentUser) return;
-
           if (!isAutoLoad) addLog(`Lendo arquivos de ${repo.name}...`);
-          
           const files = await getRepoFiles(currentUser.githubToken, repo.owner.login, repo.name);
-          setProjectData({
-              explanation: "Carregado do GitHub",
-              commitTitle: "",
-              commitDescription: "",
-              files: files
-          });
-          
-          if (files.length > 0) {
-              if (!isAutoLoad) {
-                  addLog(`✅ Projeto carregado: ${files.length} arquivos.`);
-                  playSound('success');
-              }
-          } else {
-              addLog("Repositório vazio. Use o chat para gerar o código inicial.");
+          setProjectData({ explanation: "Carregado do GitHub", commitTitle: "", commitDescription: "", files: files });
+          if (files.length > 0 && !isAutoLoad) {
+              addLog(`✅ Projeto carregado: ${files.length} arquivos.`);
+              playSound('success');
           }
       } catch (e: any) {
           addLog(`Erro ao ler repositório: ${e.message}`);
           if (!isAutoLoad) playSound('error');
       } finally {
-          setIsRepoLoading(false); // Desbloqueia UI
+          setIsRepoLoading(false);
       }
   };
 
-  // --- LOGIC DE BUILD & PROGRESSO ---
-  
   const handleCommitTriggered = () => {
       setIsBuilding(true);
       setLastRunId(null);
@@ -212,7 +177,7 @@ const App: React.FC = () => {
     try {
         addLog("🚀 Disparando Build Manualmente...");
         await triggerWorkflow(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, currentRepo.default_branch);
-        handleCommitTriggered(); // Reuses logic to start polling
+        handleCommitTriggered();
         playSound('click');
     } catch (e: any) {
         addLog(`Erro ao iniciar build: ${e.message}`);
@@ -220,41 +185,28 @@ const App: React.FC = () => {
     }
   };
 
-  // Timer: Conta o tempo real em segundos
   useEffect(() => {
       let interval: any;
-      if (isBuilding) {
-          interval = setInterval(() => {
-              setBuildTimeElapsed(prev => prev + 1);
-          }, 1000);
-      }
+      if (isBuilding) interval = setInterval(() => setBuildTimeElapsed(prev => prev + 1), 1000);
       return () => clearInterval(interval);
   }, [isBuilding]);
 
-  // Monitoramento do GitHub Actions
-  // Lógica: Espera 1m 30s (90s) e depois checa a cada 1 segundo.
   useEffect(() => {
       if (!isBuilding || !currentUser || !currentRepo) return;
-
       const checkBuildStatus = async () => {
           try {
               const run = await getLatestWorkflowRun(currentUser.githubToken, currentRepo.owner.login, currentRepo.name);
-              
               if (!run) return;
-
               if (lastRunId === null || run.id !== lastRunId) {
                   setLastRunId(run.id);
                   addLog(`🔨 GitHub Actions: Build #${run.id} detectado.`);
               }
-
               if (run.status === 'completed') {
                   if (run.conclusion === 'success') {
                       setIsBuilding(false);
                       const tagVersion = `v1.0.${run.run_number}`;
-                      
                       addLog(`✅ Build #${run.id} Sucesso! (Tempo total: ${buildTimeElapsed}s)`);
                       addLog(`📦 Release ${tagVersion} publicada!`);
-                      
                       playSound('success');
                       speakText("Build e Release concluídos com sucesso.");
                   } else if (run.conclusion === 'failure') {
@@ -264,123 +216,67 @@ const App: React.FC = () => {
                       speakText("O build falhou.");
                       handleAutoFix(run.id);
                   }
-              } else if (run.status === 'in_progress' && buildTimeElapsed >= ESTIMATED_BUILD_TIME) {
-                   // Apenas loga progresso se já passamos do tempo e estamos checando agressivamente
-                   addLog(`🔍 Verificando conclusão... (Tempo: ${buildTimeElapsed}s)`);
               }
-          } catch (e) {
-              console.error("Erro polling build", e);
-          }
+          } catch (e) { console.error("Erro polling build", e); }
       };
-
       let intervalId: any;
-
       if (buildTimeElapsed >= ESTIMATED_BUILD_TIME) {
-          // PASSOU DE 1m 30s: Checa agressivamente (1s/loop)
-          checkBuildStatus(); // Checa imediatamente ao entrar neste estado
+          checkBuildStatus();
           intervalId = setInterval(checkBuildStatus, 1000);
-      } else {
-          // MENOS DE 1m 30s:
-          // Se ainda não temos o ID do Run, checamos ocasionalmente (a cada 3s) para confirmar que começou.
-          // Se já temos o ID, ficamos em silêncio esperando o tempo passar para não gastar API quota.
-          if (lastRunId === null) {
-              intervalId = setInterval(checkBuildStatus, 3000);
-          }
+      } else if (lastRunId === null) {
+          intervalId = setInterval(checkBuildStatus, 3000);
       }
-
-      return () => {
-          if (intervalId) clearInterval(intervalId);
-      };
-
+      return () => clearInterval(intervalId);
   }, [isBuilding, currentUser, currentRepo, lastRunId, buildTimeElapsed]);
 
   const handleAutoFix = async (runId: number) => {
       if (!currentUser || !currentRepo) return;
-      
       try {
           addLog("🔍 Baixando logs do erro...");
           const logs = await getWorkflowRunLogs(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, runId);
-          
           const errorMsg: ChatMessage = {
               role: 'user',
-              text: `O build falhou! Analise estes logs e corrija o código (verifique se .github/workflows/gradle.yml está correto):\n\n${logs}`,
+              text: `O build falhou! Analise estes logs e corrija o código:\n\n${logs}`,
               id: Date.now().toString()
           };
           setMessages(prev => [...prev, errorMsg]);
-          
           addLog("🤖 IA analisando erro e gerando correção...");
-          
-          const fix = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
-          
+          const { project: fix, usage } = await generatePluginCode(errorMsg.text, settings, projectData, [], currentUser);
+          updateUsage(usage);
           addLog("🛠️ Aplicando correção no GitHub...");
-          await commitToRepo(
-              currentUser.githubToken, 
-              currentRepo.owner.login, 
-              currentRepo.name, 
-              fix.files, 
-              fix.commitTitle || "fix: correção de build", 
-              fix.commitDescription || "Correção automática baseada nos logs de erro."
-          );
-          
-          const aiResponse: ChatMessage = {
-              role: 'model',
-              text: `Corrigi o erro: ${fix.explanation}. Novo build disparado.`,
-              projectData: fix,
-              id: Date.now().toString() + '_fix'
-          };
+          await commitToRepo(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, fix.files, fix.commitTitle || "fix: correção de build", fix.commitDescription || "Correção automática.");
+          const aiResponse: ChatMessage = { role: 'model', text: `Corrigi o erro: ${fix.explanation}. Novo build disparado.`, projectData: fix, id: Date.now().toString() + '_fix' };
           setMessages(prev => [...prev, aiResponse]);
           setProjectData(fix);
-          
           handleCommitTriggered();
-
-      } catch (e: any) {
-          addLog(`Falha fatal na auto-correção: ${e.message}`);
-      }
+      } catch (e: any) { addLog(`Falha fatal na auto-correção: ${e.message}`); }
   };
 
   const showOverlay = isGenerating || isBuilding;
-  
-  // Cálculo visual do progresso baseado no tempo (capped em 100%)
   const visualProgress = Math.min(100, (buildTimeElapsed / ESTIMATED_BUILD_TIME) * 100);
   const remainingSeconds = Math.max(0, ESTIMATED_BUILD_TIME - buildTimeElapsed);
 
   return (
     <div className="flex h-screen w-full bg-[#1e1e1e] text-[#cccccc] overflow-hidden relative">
       <AuthModal isOpen={isAuthOpen} onAuthSuccess={(u) => { setCurrentUser(u); setIsAuthOpen(false); }} />
-
-      {/* OVERLAY DE BLOQUEIO / LOADING */}
       {showOverlay && (
         <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center flex-col animate-fade-in">
            <div className="bg-[#252526] p-8 rounded-xl border border-[#444] shadow-2xl flex flex-col items-center gap-4 max-w-sm w-full text-center">
                {isGenerating ? (
                    <div className="relative">
                        <BrainCircuit className="w-16 h-16 text-mc-accent animate-pulse" />
-                       <div className="absolute -bottom-1 -right-1">
-                            <Loader2 className="w-6 h-6 text-white animate-spin" />
-                       </div>
+                       <div className="absolute -bottom-1 -right-1"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>
                    </div>
                ) : (
                    <div className="relative">
                        <Clock className="w-16 h-16 text-mc-gold animate-bounce" />
-                       <div className="absolute -bottom-1 -right-1">
-                            <Loader2 className="w-6 h-6 text-white animate-spin" />
-                       </div>
+                       <div className="absolute -bottom-1 -right-1"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>
                    </div>
                )}
-               
                <div>
-                   <h2 className="text-xl font-bold text-white mb-2">
-                       {isGenerating ? "Criando Código..." : "Compilando Plugin..."}
-                   </h2>
-                   <p className="text-sm text-gray-400">
-                       {isGenerating 
-                         ? "A IA está analisando sua solicitação e escrevendo os arquivos." 
-                         : buildTimeElapsed < ESTIMATED_BUILD_TIME 
-                             ? `Aguardando GitHub Actions... (${remainingSeconds}s restantes)`
-                             : "Finalizando verificação..."}
-                   </p>
+                   <h2 className="text-xl font-bold text-white mb-2">{isGenerating ? "Criando Código..." : "Compilando Plugin..."}</h2>
+                   <p className="text-sm text-gray-400">{isGenerating ? "A IA está analisando sua solicitação..." : `Aguardando GitHub Actions... (${remainingSeconds}s)`}</p>
                </div>
-
                {isBuilding && (
                    <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden mt-2">
                        <div className="h-full bg-mc-green transition-all duration-1000 linear" style={{width: `${visualProgress}%`}}></div>
@@ -389,7 +285,6 @@ const App: React.FC = () => {
            </div>
         </div>
       )}
-
       {currentUser && (
         <>
             <Sidebar 
@@ -399,9 +294,8 @@ const App: React.FC = () => {
                 repos={repos} currentRepoId={currentRepo?.id || null}
                 onSelectRepo={handleSelectRepo} onCreateRepo={handleCreateRepo}
                 onRefreshRepos={refreshRepos} isLoadingRepos={isLoadingRepos}
-                usageStats={usageStats} // Passando uso
+                usageStats={usageStats}
             />
-
             <div className="flex-1 flex flex-col md:flex-row h-full min-w-0">
                 <div className="flex-1 md:w-[35%] h-full flex flex-col min-w-0 border-r border-[#333]">
                     <ChatInterface 
@@ -410,40 +304,13 @@ const App: React.FC = () => {
                         onProjectGenerated={setProjectData} currentUser={currentUser}
                         isBuilding={isBuilding} onCommitTriggered={handleCommitTriggered}
                         isGenerating={isGenerating} setIsGenerating={setIsGenerating}
-                        usageStats={usageStats} incrementUsage={incrementUsage}
-                        repoLoading={isLoadingRepos || isRepoLoading} // Bloqueia chat se estiver carregando repo
+                        usageStats={usageStats} onUsageUpdate={updateUsage}
+                        repoLoading={isLoadingRepos || isRepoLoading}
                         onManualBuild={handleManualBuild}
                     />
                 </div>
                 <div className="hidden md:flex flex-1 md:w-[65%] h-full flex-col min-w-0">
-                    <CodeViewer 
-                        project={projectData} settings={settings} 
-                        directoryHandle={null} 
-                        onAddToContext={() => {}} 
-                    />
-                    
-                    {/* Barra de Progresso do Build (Redundante com Overlay mas útil se o overlay for removido no futuro) */}
-                    {isBuilding && !showOverlay && (
-                        <div className="bg-[#252526] border-t border-[#333] px-4 py-2">
-                            <div className="flex justify-between text-xs text-white mb-1 font-mono">
-                                <span>
-                                    BUILD EM ANDAMENTO (Run #{lastRunId || '...'})
-                                </span>
-                                <span>
-                                    {buildTimeElapsed < ESTIMATED_BUILD_TIME 
-                                        ? `Aguardando: ${remainingSeconds}s` 
-                                        : "Verificando..."}
-                                </span>
-                            </div>
-                            <div className="w-full bg-[#333] h-2 rounded-full overflow-hidden">
-                                <div 
-                                    className="bg-mc-green h-full transition-all duration-1000 linear"
-                                    style={{ width: `${visualProgress}%` }}
-                                ></div>
-                            </div>
-                        </div>
-                    )}
-
+                    <CodeViewer project={projectData} settings={settings} directoryHandle={null} onAddToContext={() => {}} />
                     <Terminal logs={terminalLogs} isOpen={true} onClose={() => {}} onClear={() => setTerminalLogs([])} onAddLog={addLog} />
                 </div>
             </div>
