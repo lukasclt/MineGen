@@ -24,11 +24,11 @@ export const getUserRepos = async (token: string) => {
     return await res.json();
 };
 
-export const createRepository = async (token: string, name: string, description: string) => {
+export const createRepository = async (token: string, name: string, description: string, isPrivate: boolean = true) => {
     const res = await fetch(`${GITHUB_API_URL}/user/repos`, {
         method: 'POST',
         headers: getHeaders(token),
-        body: JSON.stringify({ name, description, private: true, auto_init: true }) // Auto init cria branch main
+        body: JSON.stringify({ name, description, private: isPrivate, auto_init: true }) // Auto init cria branch main
     });
     if (!res.ok) throw new Error("Erro ao criar repositório");
     return await res.json();
@@ -219,7 +219,7 @@ export const commitToRepo = async (
     return newCommitSha;
 };
 
-// --- ACTIONS & BUILDS ---
+// --- ACTIONS & BUILDS & DOWNLOADS ---
 
 export const triggerWorkflow = async (token: string, owner: string, repo: string, branch: string = 'main') => {
     const res = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/actions/workflows/gradle.yml/dispatches`, {
@@ -261,4 +261,55 @@ export const getWorkflowRunLogs = async (token: string, owner: string, repo: str
     // Pegar apenas as últimas 80 linhas para não estourar contexto da IA (reduzido de 150)
     const lines = text.split('\n');
     return lines.slice(-80).join('\n');
+};
+
+/**
+ * Busca a Release criada pelo número da Run e faz o download automático do .jar
+ */
+export const downloadReleaseJar = async (token: string, owner: string, repo: string, runNumber: number): Promise<boolean> => {
+    try {
+        const tagName = `v1.0.${runNumber}`;
+        
+        // 1. Buscar a Release pela tag
+        const releaseRes = await fetch(`${GITHUB_API_URL}/repos/${owner}/${repo}/releases/tags/${tagName}`, {
+            headers: getHeaders(token)
+        });
+        
+        if (!releaseRes.ok) return false;
+        
+        const releaseData = await releaseRes.json();
+        
+        // 2. Encontrar o asset .jar
+        const jarAsset = releaseData.assets.find((a: any) => a.name.endsWith('.jar'));
+        
+        if (!jarAsset) return false;
+        
+        // 3. Baixar o conteúdo (Blob)
+        // Usamos Header 'Accept: application/octet-stream' para baixar o binário
+        const downloadRes = await fetch(jarAsset.url, {
+            headers: {
+                ...getHeaders(token),
+                "Accept": "application/octet-stream"
+            }
+        });
+        
+        if (!downloadRes.ok) return false;
+        
+        const blob = await downloadRes.blob();
+        
+        // 4. Trigger de download no navegador
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = jarAsset.name; // Nome original do arquivo (ex: MeuPlugin-1.0.jar)
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        return true;
+    } catch (e) {
+        console.error("Erro no download automático:", e);
+        return false;
+    }
 };

@@ -22,7 +22,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   aiModel: 'gpt-4o', 
   aiUrl: 'https://models.inference.ai.azure.com', 
   enableSounds: true,
-  enableTTS: false 
+  enableTTS: false,
+  isPrivate: true // Padrão seguro
 };
 
 export const MC_VERSIONS = [
@@ -285,7 +286,7 @@ location of your Java installation."
 fi
 
 # Increase the maximum file descriptors if we can.
-if [ "$cygwin" = "false" -a "$darwin" = "false" -a "$nonstop" = "false" ] ; then
+if [ "$cygwin" = "false" -o "$darwin" = "false" -o "$nonstop" = "false" ] ; then
     MAX_FD_LIMIT=\`ulimit -H -n\`
     if [ $? -eq 0 ] ; then
         if [ "$MAX_FD" = "maximum" -o "$MAX_FD" = "max" ] ; then

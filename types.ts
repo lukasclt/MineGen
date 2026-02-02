@@ -48,13 +48,14 @@ export interface PluginSettings {
   mcVersion: string;
   javaVersion: JavaVersion;
   buildSystem: BuildSystem;
-  aiProvider: AIProvider; // Novo campo
+  aiProvider: AIProvider;
   description: string;
   author: string;
   aiModel: string;
   aiUrl: string;
   enableSounds: boolean;
   enableTTS: boolean;
+  isPrivate: boolean; // Novo campo para visibilidade
 }
 
 export interface GeneratedFile {
@@ -102,6 +103,7 @@ export interface GitHubRepo {
   };
   default_branch: string;
   updated_at: string;
+  private: boolean; // Mapeia se é privado vindo do GitHub
 }
 
 export interface ProjectState {

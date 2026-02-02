@@ -7,10 +7,10 @@ import CodeViewer from './components/CodeViewer';
 import Terminal from './components/Terminal';
 import AuthModal from './components/AuthModal';
 import { DEFAULT_SETTINGS, getGithubWorkflowYml } from './constants';
-import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo, triggerWorkflow } from './services/githubService';
+import { getUserRepos, createRepository, getRepoFiles, getLatestWorkflowRun, getWorkflowRunLogs, commitToRepo, triggerWorkflow, downloadReleaseJar } from './services/githubService';
 import { playSound, speakText } from './services/audioService';
 import { generatePluginCode } from './services/geminiService';
-import { Loader2, Hammer, BrainCircuit, Clock, ChevronDown, ExternalLink, X } from 'lucide-react';
+import { Loader2, Hammer, BrainCircuit, Clock, ChevronDown, ExternalLink, X, Download } from 'lucide-react';
 
 const ESTIMATED_BUILD_TIME = 60;
 
@@ -31,7 +31,7 @@ const App: React.FC = () => {
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   
   const [isBuilding, setIsBuilding] = useState(false);
-  const [showBuildOverlay, setShowBuildOverlay] = useState(false); // Novo: controla visibilidade do overlay separadamente
+  const [showBuildOverlay, setShowBuildOverlay] = useState(false); 
   const [lastRunId, setLastRunId] = useState<number | null>(null);
   const [buildTimeElapsed, setBuildTimeElapsed] = useState(0);
 
@@ -104,13 +104,21 @@ const App: React.FC = () => {
   const handleCreateRepo = async () => {
       const name = prompt("Nome do Repositório (sem espaços):");
       if (!name || !currentUser) return;
+
+      const isPublic = window.confirm(
+          "O repositório deve ser PÚBLICO?\n\n[OK] para Público\n[Cancelar] para Privado"
+      );
+      const isPrivate = !isPublic;
       
       try {
-          addLog("Criando repositório no GitHub...");
-          const newRepo = await createRepository(currentUser.githubToken, name, "Projeto MineGen AI");
+          addLog(`Criando repositório ${isPrivate ? 'Privado' : 'Público'} no GitHub...`);
+          const newRepo = await createRepository(currentUser.githubToken, name, "Projeto MineGen AI", isPrivate);
           setRepos(prev => [newRepo, ...prev]);
           setCurrentRepo(newRepo);
           setMessages([]);
+
+          // Atualiza as settings com a preferência de privacidade
+          setSettings(prev => ({...prev, isPrivate: isPrivate}));
           
           addLog(`Inicializando estrutura Gradle com Java ${settings.javaVersion} e Auto-Release...`);
           const initialFiles: GeneratedFile[] = [
@@ -140,9 +148,12 @@ const App: React.FC = () => {
           const parsed = JSON.parse(savedSettings);
           parsed.aiProvider = AIProvider.GITHUB_COPILOT;
           parsed.aiModel = 'gpt-4o';
+          // Garante que isPrivate esteja sincronizado com o repo real se possível, mas usa o salvo por enquanto
+          // Se não tiver isPrivate salvo, tenta inferir do objeto repo
+          if (parsed.isPrivate === undefined) parsed.isPrivate = repo.private;
           setSettings(prev => ({...prev, ...parsed}));
       } else {
-          setSettings(prev => ({...DEFAULT_SETTINGS, name: repo.name}));
+          setSettings(prev => ({...DEFAULT_SETTINGS, name: repo.name, isPrivate: repo.private}));
       }
 
       setProjectData(null);
@@ -186,7 +197,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Timer simples de segundos
   useEffect(() => {
       let interval: any;
       if (isBuilding) interval = setInterval(() => setBuildTimeElapsed(prev => prev + 1), 1000);
@@ -210,16 +220,33 @@ const App: React.FC = () => {
               }
 
               if (run.status === 'completed') {
-                  setIsBuilding(false);
-                  setShowBuildOverlay(false);
-                  
                   if (run.conclusion === 'success') {
+                      setIsBuilding(false);
+                      setShowBuildOverlay(false);
+
                       const tagVersion = `v1.0.${run.run_number}`;
-                      addLog(`✅ Build #${run.run_number} Sucesso em ${buildTimeElapsed}s!`);
-                      addLog(`📦 Artefato disponível no GitHub Releases.`);
-                      playSound('success');
-                      speakText("Plugin compilado com sucesso.");
+                      addLog(`✅ Build #${run.run_number} Concluído!`);
+                      
+                      // AUTOMATIC DOWNLOAD LOGIC
+                      addLog(`⬇️ Baixando plugin automaticamente...`);
+                      speakText("Build sucesso. Baixando arquivo.");
+                      
+                      // Tentativa de download (pode precisar de alguns segundos para a release propagar)
+                      setTimeout(async () => {
+                          const downloaded = await downloadReleaseJar(currentUser.githubToken, currentRepo.owner.login, currentRepo.name, run.run_number);
+                          if (downloaded) {
+                              addLog(`📦 Arquivo salvo na pasta Downloads.`);
+                              playSound('success');
+                          } else {
+                              addLog(`⚠️ Não foi possível baixar automaticamente. Verifique o GitHub.`);
+                              playSound('message');
+                          }
+                      }, 2000);
+
                   } else {
+                      setIsBuilding(false);
+                      setShowBuildOverlay(false);
+                      
                       addLog(`❌ Build #${run.run_number} Falhou.`);
                       playSound('error');
                       speakText("O build falhou.");
@@ -231,9 +258,8 @@ const App: React.FC = () => {
           }
       };
 
-      // Executa a cada 5 segundos cravados
       const intervalId = setInterval(checkBuildStatus, 5000);
-      checkBuildStatus(); // Primeira execução imediata
+      checkBuildStatus(); 
 
       return () => clearInterval(intervalId);
   }, [isBuilding, currentUser, currentRepo, lastRunId]);

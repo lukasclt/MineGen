@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { PluginSettings, Platform, JavaVersion, GitHubRepo, BuildSystem, User, AIProvider, UsageStats } from '../types';
 import { MC_VERSIONS, GITHUB_COPILOT_MODELS } from '../constants';
-import { GitBranch, Plus, Sliders, LogOut, FolderGit2, RefreshCw, Github } from 'lucide-react';
+import { GitBranch, Plus, Sliders, LogOut, FolderGit2, RefreshCw, Github, Lock, Globe } from 'lucide-react';
 
 interface ConfigSidebarProps {
   settings: PluginSettings;
@@ -89,7 +89,10 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                         <div className="flex-1 min-w-0">
                             {/* Mostra 'owner/repo' para diferenciar repositórios de colaboração */}
                             <h4 className={`text-sm font-medium truncate ${currentRepoId === repo.id ? 'text-white' : 'text-gray-400'}`}>{repo.full_name}</h4>
-                            <p className="text-[10px] text-gray-600 truncate">{new Date(repo.updated_at).toLocaleDateString()}</p>
+                            <p className="text-[10px] text-gray-600 truncate flex justify-between">
+                              <span>{new Date(repo.updated_at).toLocaleDateString()}</span>
+                              {repo.private && <Lock className="w-3 h-3 text-gray-500 inline" />}
+                            </p>
                         </div>
                     </div>
                 ))}
@@ -152,6 +155,36 @@ const ConfigSidebar: React.FC<ConfigSidebarProps> = ({
                         </p>
                     </div>
                 )}
+
+                <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
+                   <label className="text-xs font-bold text-gray-400 uppercase">
+                       Visibilidade do Repositório
+                   </label>
+                   
+                   <div className="flex gap-2">
+                      <button
+                        onClick={() => handleChange('isPrivate', true)}
+                        className={`flex-1 py-2 px-2 rounded flex items-center justify-center gap-1.5 text-xs border transition-all ${settings.isPrivate 
+                          ? 'bg-red-900/30 border-red-500/50 text-red-200' 
+                          : 'bg-[#1e1e1e] border-[#333] text-gray-500 hover:bg-[#333]'}`}
+                        disabled={isConfigDisabled}
+                      >
+                         <Lock className="w-3 h-3" /> Privado
+                      </button>
+                      <button
+                        onClick={() => handleChange('isPrivate', false)}
+                        className={`flex-1 py-2 px-2 rounded flex items-center justify-center gap-1.5 text-xs border transition-all ${!settings.isPrivate 
+                          ? 'bg-blue-900/30 border-blue-500/50 text-blue-200' 
+                          : 'bg-[#1e1e1e] border-[#333] text-gray-500 hover:bg-[#333]'}`}
+                        disabled={isConfigDisabled}
+                      >
+                         <Globe className="w-3 h-3" /> Público
+                      </button>
+                   </div>
+                   <p className="text-[10px] text-gray-500">
+                      Define a visibilidade para novos repositórios ou atualiza a preferência local.
+                   </p>
+                </div>
 
                 <div className="space-y-4 bg-[#252526] p-3 rounded-md border border-[#333]">
                    <label className="text-xs font-bold text-gray-400 uppercase">
